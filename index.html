@@ -339,6 +339,9 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
       <h2>연결 설정</h2>
       <p class="desc">Supabase 대시보드 → Settings → API 에서 값을 복사해 넣으세요.
         이 브라우저에만 저장됩니다.</p>
+      <div class="msg info">여러 사람이 쓸 때는 이 화면이 뜨지 않게 하는 편이 낫습니다.
+        simony.html 맨 위의 <b>SUPABASE_URL</b>과 <b>SUPABASE_KEY</b>에 값을 적어 두면
+        모두가 바로 로그인 화면으로 들어갑니다.</div>
       <div class="field" style="margin-bottom:12px">
         <label>Project URL</label>
         <input type="text" id="cfgUrl" placeholder="https://xxxx.supabase.co">
@@ -369,9 +372,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
     <label class="hint" style="display:flex;align-items:center;gap:7px;margin-bottom:14px;cursor:pointer">
       <input type="checkbox" id="remember"> 이 기기에서 이메일 기억하기</label>
     <button class="btn" id="loginBtn" onclick="doLogin()">로그인</button>
-    <div class="hint" style="text-align:center;margin-top:14px">
-      <a href="#" onclick="resetConfig();return false" style="color:var(--sub)">연결 설정 변경</a>
-    </div>
+    <div class="hint" style="text-align:center;margin-top:14px" id="cfgLink"></div>
   </div>
 </div>
 
@@ -391,6 +392,24 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 </div>
 
 <script>
+/* ═══════════════════════════════════════════════════
+   ◆ 여기 세 줄만 채우면 됩니다 ◆
+
+   이 값을 넣어 두면 상담사는 연결 설정 화면을 보지 않고
+   바로 로그인 화면으로 들어갑니다.
+
+   · SUPABASE_URL : Supabase → Settings → API → Project URL
+   · SUPABASE_KEY : 같은 화면의 anon public 키
+                    (service_role 키가 아닙니다. anon 키는 공개되어도
+                     Row Level Security가 막아 주므로 안전합니다.)
+   · API_URL      : Cloud Run 주소. 관리자 기능에만 쓰입니다.
+
+   비워 두면 예전처럼 연결 설정 화면이 뜹니다.
+   ═══════════════════════════════════════════════════ */
+const SUPABASE_URL = '';
+const SUPABASE_KEY = '';
+const API_URL      = '';
+
 /* ═══════════════════════════════════════════════════
    시모니 1.0 폼 렌더러
    forms / form_fields 정의를 읽어 화면을 자동 생성합니다.
@@ -416,11 +435,16 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-11 n';
+const APP_VERSION = '2026-08-11 o';
 
 /* ── 연결 설정 ── */
 function getConfig(){
-  return { url: localStorage.getItem('sb_url'), key: localStorage.getItem('sb_key') };
+  // 파일에 심어 둔 값이 있으면 그것을 씁니다.
+  // 없을 때만 이 브라우저에 저장된 값을 찾습니다.
+  return {
+    url: SUPABASE_URL || localStorage.getItem('sb_url'),
+    key: SUPABASE_KEY || localStorage.getItem('sb_key'),
+  };
 }
 function saveConfig(){
   const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/,'');
@@ -499,7 +523,9 @@ function ageGroupFromBirth(birth){
 }
 
 /* ── 백엔드(Cloud Run) 주소 ── */
-function apiBase(){ return (localStorage.getItem('sb_api')||'').replace(/\/$/,''); }
+function apiBase(){
+  return (API_URL || localStorage.getItem('sb_api') || '').replace(/\/$/,'');
+}
 async function apiCall(path, opts){
   const base = apiBase();
   if(!base) throw new Error('백엔드 주소가 설정되지 않았습니다. 관리 → 내담자 DB 화면에서 등록하세요.');
@@ -521,7 +547,8 @@ async function apiCall(path, opts){
   if(!cfg.url || !cfg.key){ show('setupView'); return; }
   sb = supabase.createClient(cfg.url, cfg.key);
   const { data:{ session } } = await sb.auth.getSession();
-  if(session) await enterApp(); else { show('loginView'); loadRememberedEmail(); }
+  if(session) await enterApp();
+  else { show('loginView'); showConfigLink(); loadRememberedEmail(); }
 })();
 
 /* ── 로그인 ── */
@@ -542,6 +569,14 @@ function fillDomain(dm){
   el.value = el.value.trim().replace(/@.*$/,'') + '@' + dm;
   $('domainChips').innerHTML='';
   $('password').focus();
+}
+// 파일에 값을 심어 두지 않은 경우에만 설정 변경 링크를 보여 줍니다
+function showConfigLink(){
+  const box = $('cfgLink');
+  if(!box) return;
+  box.innerHTML = SUPABASE_URL
+    ? ''
+    : `<a href="#" onclick="resetConfig();return false" style="color:var(--sub)">연결 설정 변경</a>`;
 }
 function loadRememberedEmail(){
   const saved = localStorage.getItem('sb_email');
@@ -2459,11 +2494,13 @@ function adminSync(){
     <h2>백엔드 주소</h2>
     <div class="desc">템플릿 생성과 인사이동 대조는 서버가 처리합니다.
       Cloud Run 주소를 한 번만 등록해 두세요.</div>
-    <div class="searchbar">
-      <input type="text" id="apiUrl" value="${esc(api)}"
-        placeholder="https://simony-api-xxxx.run.app">
-      <button class="btn" onclick="saveApi()">저장</button>
-    </div>
+    ${API_URL ? `<div class="msg info">파일에 <b>${esc(API_URL)}</b> 로 정해져 있습니다.
+        바꾸려면 simony.html 맨 위의 API_URL 값을 고쳐 주세요.</div>`
+      : `<div class="searchbar">
+        <input type="text" id="apiUrl" value="${esc(api)}"
+          placeholder="https://simony-api-xxxx.run.app">
+        <button class="btn" onclick="saveApi()">저장</button>
+      </div>`}
     ${api?'':'<div class="msg bad" style="margin-top:12px">주소가 없어 아래 기능이 동작하지 않습니다.</div>'}
   </div>
 
