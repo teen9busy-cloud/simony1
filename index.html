@@ -435,7 +435,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-11 o';
+const APP_VERSION = '2026-08-11 p';
 
 /* ── 연결 설정 ── */
 function getConfig(){
@@ -762,6 +762,8 @@ function renderTabs(){
   }
 }
 function canManage(){ return ['super_admin','manager'].includes(S.me.role); }
+// 지역·사용자·폼처럼 전 지역에 영향을 주는 것은 최종관리자만 다룹니다
+function isSuper(){ return S.me.role === 'super_admin'; }
 
 /* 주소창에 지금 보는 화면을 남겨, 브라우저 뒤로가기가 동작하게 합니다.
    openTab은 기록을 남기고, 뒤로가기로 들어올 때는 showTab만 부릅니다. */
@@ -1825,10 +1827,15 @@ const FIELD_TYPES = [
 const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 
 function renderAdmin(sub){
-  const nav = ['grid','데이터 관리','forms','폼과 항목','regions','지역',
-               'master','소속과 직급','users','사용자','sync','내담자 DB',
+  // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
+  // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
+  const nav = ['grid','데이터 관리','master','상세소속','sync','내담자 DB',
                'upload','검사 업로드'];
-  if(S.me.role === 'super_admin') nav.push('audit','수정 로그');
+  if(isSuper()){
+    nav.unshift('forms','폼과 항목');
+    nav.splice(4, 0, 'regions','지역');
+    nav.push('users','사용자', 'audit','수정 로그');
+  }
   let html = '<div class="panel" style="padding:0;overflow:hidden">'
     + '<div style="display:flex;gap:2px;background:var(--line2);padding:4px">';
   for(let i=0;i<nav.length;i+=2){
@@ -1839,6 +1846,15 @@ function renderAdmin(sub){
   }
   html += '</div></div><div id="adminBody"></div>';
   $('content').innerHTML = html;
+  // 권한이 없는 화면은 열지 않습니다
+  if(['forms','regions','users','audit'].includes(sub) && !isSuper()){
+    $('adminBody').innerHTML = `<div class="panel"><div class="msg bad">
+      이 화면은 최종관리자만 볼 수 있습니다.
+      <div class="hint" style="margin-top:6px;color:inherit">
+        지역·사용자·폼은 모든 지역이 함께 쓰기 때문입니다.
+        필요하신 것이 있으면 최종관리자에게 말씀해 주세요.</div></div></div>`;
+    return;
+  }
   if(sub==='grid') adminGrid();
   else if(sub==='audit') adminAudit();
   else if(sub==='forms') adminForms();
@@ -1878,6 +1894,7 @@ async function adminForms(){
 function pickForm(id){ S._pickForm=id; adminForms(); }
 
 function editForm(id){
+  if(!isSuper()){ toast('폼은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const f = id ? S._aforms.find(x=>x.id===id) : null;
   modal(`${f?'폼 수정':'새 폼 만들기'}`, `
     <div class="grid">
@@ -1972,6 +1989,7 @@ async function moveField(i,dir){
 }
 
 function editField(id){
+  if(!isSuper()){ toast('폼 항목은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const f = id ? S._afields.find(x=>x.id===id) : null;
   const sections = [...new Set(S._afields.map(x=>x.section).filter(Boolean))];
   const typeOpts = FIELD_TYPES.map(([v,l])=>
@@ -2066,6 +2084,7 @@ function regionRow(r, child, parentName){
     </td></tr>`;
 }
 function editRegion(id, parentId){
+  if(!isSuper()){ toast('지역은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const r = id ? S._aregions.find(x=>x.id===id) : null;
   const isNew = !r;
   /* 설정 복사는 '상위지역을 새로 만들 때'만 뜻이 있습니다.
@@ -2194,6 +2213,7 @@ async function copyRegionSetup(srcId, dstId, opts){
 }
 
 async function delRegion(id){
+  if(!isSuper()){ toast('지역은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const r = S._aregions.find(x=>x.id===id);
   const kids = S._aregions.filter(x=>x.parent_id===id).length;
   if(kids){ toast(`하위지역 ${kids}개를 먼저 옮기거나 지우세요`,'bad'); return; }
@@ -2258,6 +2278,7 @@ function autoUsername(){
   un.value = local;
 }
 function editUser(id){
+  if(!isSuper()){ toast('사용자은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const u = id ? S._ausers.find(x=>x.id===id) : null;
   const mine = new Set(S._amaps.filter(m=>m.user_id===id).map(m=>m.region_id));
   const tops = S._aregions.filter(r=>!r.parent_id);
@@ -2348,8 +2369,10 @@ async function adminMaster(){
   const tops = S.regions;
   let html = `<div class="panel">
     <h2>상세소속 (부서)</h2>
-    <div class="desc">여기 넣은 목록이 상담일지와 내담자 등록의 '상세소속' 드롭다운이 됩니다.
+    <div class="desc">여기 넣은 목록이 내담자 등록 화면의 부서 선택지가 됩니다.
       지역을 고르면 그 지역 목록만 나옵니다.</div>
+    ${isSuper() ? '' : `<div class="msg info">직급·직무 목록은 모든 지역이 함께 쓰기 때문에
+      최종관리자가 관리합니다. 추가할 것이 있으면 말씀해 주세요.</div>`}
     <div class="grid"><div class="field">
       <label>지역</label>
       <select id="mst_region" onchange="S._mstRegion=this.value;adminMaster()">
@@ -2376,7 +2399,8 @@ async function adminMaster(){
       <button class="btn ghost" onclick="bulkDept()">여러 개 한번에 추가</button>
     </div></div>`;
 
-  for(const [type,label] of [['rank','직급'],['duty','직무']]){
+  // 직급·직무는 전 지역 공용이라 최종관리자만 고칩니다
+  for(const [type,label] of (isSuper() ? [['rank','직급'],['duty','직무']] : [])){
     const items = S.codes[type]||[];
     html += `<div class="panel"><h2>${label}</h2>
       <div class="desc">전 지역 공용 목록입니다.</div>
@@ -2449,6 +2473,7 @@ async function delDept(id){
   toast('부서를 지웠습니다'); adminMaster();
 }
 function editCode(type,id){
+  if(!isSuper()){ toast('직급·직무은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
   const c = id ? (S.codes[type]||[]).find(x=>x.id===id) : null;
   const label = type==='rank'?'직급':'직무';
   modal(c?label+' 수정':label+' 추가', `
@@ -2478,6 +2503,7 @@ function editCode(type,id){
     });
 }
 async function delCode(id){
+  if(!isSuper()){ toast('직급·직무는 최종관리자만 다룰 수 있습니다','bad'); return; }
   if(!confirm('목록에서 지웁니다. 이미 저장된 기록의 값은 그대로 남습니다. 계속할까요?')) return;
   const { error } = await sb.from('code_options').delete().eq('id',id);
   if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
@@ -2965,7 +2991,8 @@ function editClientRow(i){
       <div class="field"><label>직무</label>
         <input type="text" id="e_duty" value="${esc(c.extra?.duty||'')}"></div>
     </div>
-    <div class="msg info" style="margin-top:14px">고친 내용은 누가 언제 무엇을 바꿨는지 자동으로 남습니다.</div>`,
+    <div class="msg info" style="margin-top:14px">고친 내용은 누가 언제 무엇을 바꿨는지 자동으로 남습니다.
+      ${isSuper() ? '' : '<br>담당 지역 밖으로는 옮길 수 없습니다.'}</div>`,
     async ()=>{
       const name=$('e_name').value.trim();
       const birth=normalizeBirth($('e_birth').value);
@@ -3312,9 +3339,15 @@ async function renderHome(){
 
   if(canManage()){
     html += `<div class="eyebrow">관리자 전용</div><div class="quick">`;
-    html += qbtn('폼과 항목','입력 화면 편집',"openTab('admin:forms')");
-    html += qbtn('지역','상위·하위지역 관리',"openTab('admin:regions')");
-    html += qbtn('사용자','계정과 권한',"openTab('admin:users')");
+    html += qbtn('데이터 관리','기록과 명부 훑어보기',"openTab('admin:grid')");
+    html += qbtn('내담자 DB','명부 양식과 인사이동',"openTab('admin:sync')");
+    html += qbtn('상세소속','소방서별 부서 목록',"openTab('admin:master')");
+    if(isSuper()){
+      html += qbtn('폼과 항목','입력 화면 편집',"openTab('admin:forms')");
+      html += qbtn('지역','상위·하위지역 관리',"openTab('admin:regions')");
+      html += qbtn('사용자','계정과 권한',"openTab('admin:users')");
+      html += qbtn('수정 로그','누가 무엇을 바꿨는지',"openTab('admin:audit')");
+    }
     html += `</div>`;
   }
 
