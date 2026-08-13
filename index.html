@@ -361,16 +361,16 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   <div class="panel">
     <h2>시모니 1.0</h2>
     <div id="loginMsg"></div>
-    <div class="field"><label>이메일</label>
-      <input type="email" id="email" autocomplete="username" inputmode="email"
-        placeholder="이름@example.com" oninput="suggestDomains()"
+    <div class="field"><label>아이디</label>
+      <input type="text" id="email" autocomplete="username"
+        placeholder="아이디" autocapitalize="off" spellcheck="false"
         onkeydown="if(event.key==='Enter')document.getElementById('password').focus()">
-      <div class="domains" id="domainChips"></div></div>
+      <div class="hint">영문 소문자와 숫자로 된 아이디입니다. 모르시면 관리자에게 물어보세요.</div></div>
     <div class="field"><label>비밀번호</label>
       <input type="password" id="password" autocomplete="current-password"
         onkeydown="if(event.key==='Enter')doLogin()"></div>
     <label class="hint" style="display:flex;align-items:center;gap:7px;margin-bottom:14px;cursor:pointer">
-      <input type="checkbox" id="remember"> 이 기기에서 이메일 기억하기</label>
+      <input type="checkbox" id="remember"> 이 기기에서 아이디 기억하기</label>
     <button class="btn" id="loginBtn" onclick="doLogin()">로그인</button>
     <div class="hint" style="text-align:center;margin-top:14px" id="cfgLink"></div>
   </div>
@@ -406,9 +406,9 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 
    비워 두면 예전처럼 연결 설정 화면이 뜹니다.
    ═══════════════════════════════════════════════════ */
-const SUPABASE_URL = 'https://jrpbdhhnyyjsuohnvapu.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpycGJkaGhueXlqc3VvaG52YXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NDU4NzcsImV4cCI6MjEwMDEyMTg3N30.A3AzUOpriCJ2P4BBMR2tev13HCRJvoFr7_wt3_OBa2Q';   // anon public 키
-const API_URL      = 'https://simony-api-400964231306.asia-northeast3.run.app';
+const SUPABASE_URL = '';
+const SUPABASE_KEY = '';
+const API_URL      = '';
 
 /* ═══════════════════════════════════════════════════
    시모니 1.0 폼 렌더러
@@ -435,7 +435,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-11 p';
+const APP_VERSION = '2026-08-12 q';
 
 /* ── 연결 설정 ── */
 function getConfig(){
@@ -552,32 +552,9 @@ async function apiCall(path, opts){
 })();
 
 /* ── 로그인 ── */
-const MAIL_DOMAINS = ['gmail.com','naver.com','daum.net','hanmail.net','korea.kr','kakao.com'];
+// 로그인 주소를 만들 때 붙이는 도메인. 서버의 LOGIN_DOMAIN과 같아야 합니다.
+const LOGIN_DOMAIN = 'simony.local';
 
-// 이메일을 길게 치지 않도록, @ 앞까지만 쓰면 뒤를 눌러서 채우게 합니다
-function suggestDomains(){
-  const box=$('domainChips'); if(!box) return;
-  const v=$('email').value.trim();
-  if(!v || v.includes('@') && v.split('@')[1]){ box.innerHTML=''; return; }
-  const local = v.replace('@','');
-  box.innerHTML = MAIL_DOMAINS.map(dm=>
-    `<button type="button" class="domain-chip"
-      onclick="fillDomain('${dm}')">@${dm}</button>`).join('');
-}
-function fillDomain(dm){
-  const el=$('email');
-  el.value = el.value.trim().replace(/@.*$/,'') + '@' + dm;
-  $('domainChips').innerHTML='';
-  $('password').focus();
-}
-// 파일에 값을 심어 두지 않은 경우에만 설정 변경 링크를 보여 줍니다
-function showConfigLink(){
-  const box = $('cfgLink');
-  if(!box) return;
-  box.innerHTML = SUPABASE_URL
-    ? ''
-    : `<a href="#" onclick="resetConfig();return false" style="color:var(--sub)">연결 설정 변경</a>`;
-}
 function loadRememberedEmail(){
   const saved = localStorage.getItem('sb_email');
   if(saved && $('email')){
@@ -589,22 +566,29 @@ function loadRememberedEmail(){
 async function doLogin(){
   const btn=$('loginBtn'), box=$('loginMsg');
   box.innerHTML='';
-  const email=$('email').value.trim(), password=$('password').value;
-  if(!email||!password){ box.innerHTML='<div class="msg bad">이메일과 비밀번호를 입력하세요.</div>'; return; }
+  const raw = $('email').value.trim(), password = $('password').value;
+  if(!raw||!password){
+    box.innerHTML='<div class="msg bad">아이디와 비밀번호를 입력하세요.</div>'; return;
+  }
+  // 아이디만 치면 시스템이 로그인 주소를 만들어 씁니다.
+  // 예전처럼 이메일을 그대로 치는 것도 받아 줍니다.
+  const email = raw.includes('@') ? raw : (raw.toLowerCase() + '@' + LOGIN_DOMAIN);
   btn.disabled=true; btn.textContent='확인 중…';
   const { error } = await sb.auth.signInWithPassword({ email, password });
   btn.disabled=false; btn.textContent='로그인';
   if(!error){
-    if($('remember')?.checked) localStorage.setItem('sb_email', email);
+    if($('remember')?.checked) localStorage.setItem('sb_email', raw);
     else localStorage.removeItem('sb_email');
   }
   if(error){
     const m = String(error.message||'');
     let guide;
     if(/Invalid login credentials/i.test(m))
-      guide = '이메일 또는 비밀번호가 맞지 않습니다. 대시보드에서 비밀번호를 다시 설정해 보세요.';
+      guide = '아이디 또는 비밀번호가 맞지 않습니다. 관리자에게 다시 물어보세요.';
     else if(/Email not confirmed/i.test(m))
-      guide = '이메일 확인이 끝나지 않은 계정입니다. 대시보드 → Authentication에서 계정을 확인 처리하세요.';
+      guide = '아직 쓸 수 없는 계정입니다. 관리자에게 말씀해 주세요.';
+    else if(/banned|disabled/i.test(m))
+      guide = '사용이 중지된 계정입니다. 관리자에게 문의해 주세요.';
     else if(/Invalid API key|No API key|JWT/i.test(m))
       guide = 'anon 키가 더 이상 유효하지 않습니다. 아래 \'연결 설정 변경\'에서 현재 키를 다시 넣으세요.';
     else if(/rate|too many/i.test(m))
@@ -1829,12 +1813,12 @@ const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
-  const nav = ['grid','데이터 관리','master','상세소속','sync','내담자 DB',
-               'upload','검사 업로드'];
+  const nav = ['grid','데이터 관리','master','상세소속','users','사용자',
+               'sync','내담자 DB','upload','검사 업로드'];
   if(isSuper()){
     nav.unshift('forms','폼과 항목');
     nav.splice(4, 0, 'regions','지역');
-    nav.push('users','사용자', 'audit','수정 로그');
+    nav.push('audit','수정 로그');
   }
   let html = '<div class="panel" style="padding:0;overflow:hidden">'
     + '<div style="display:flex;gap:2px;background:var(--line2);padding:4px">';
@@ -1847,7 +1831,7 @@ function renderAdmin(sub){
   html += '</div></div><div id="adminBody"></div>';
   $('content').innerHTML = html;
   // 권한이 없는 화면은 열지 않습니다
-  if(['forms','regions','users','audit'].includes(sub) && !isSuper()){
+  if(['forms','regions','audit'].includes(sub) && !isSuper()){
     $('adminBody').innerHTML = `<div class="panel"><div class="msg bad">
       이 화면은 최종관리자만 볼 수 있습니다.
       <div class="hint" style="margin-top:6px;color:inherit">
@@ -2246,999 +2230,236 @@ async function adminUsers(){
   const rname={}; regions.forEach(r=>rname[r.id]=r.name);
   const roleLabel={ super_admin:'최종관리자', manager:'중간관리자', counselor:'상담사' };
 
+  // 중간관리자는 자기 지역 상담사만 다룹니다
+  const mine = new Set();
+  if(!isSuper()){
+    S.regions.forEach(r=>mine.add(r.id));
+  }
+  const canTouch = u => {
+    if(isSuper()) return true;
+    if(u.role!=='counselor') return false;
+    const rs = maps.filter(m=>m.user_id===u.id).map(m=>m.region_id);
+    return rs.length>0 && rs.every(r=>mine.has(r));
+  };
+  const visible = isSuper() ? users
+    : users.filter(u=>canTouch(u) || u.id===S.me.id);
+
   let html = `<div class="panel">
     <h2>사용자</h2>
-    <div class="desc">먼저 Supabase 대시보드 → Authentication → Users에서
-      <b>실제 이메일 주소</b>로 계정을 만들고, 거기 표시된 UID를 아래에 등록하세요.
-      이메일은 고위험군 알림과 비밀번호 찾기에 쓰입니다.</div>
-    <table><thead><tr><th>이름</th><th>이메일</th><th>권한</th><th>담당 지역</th>
-      <th>알림</th><th></th></tr></thead><tbody>`;
-  for(const u of users){
-    const mine=maps.filter(m=>m.user_id===u.id).map(m=>rname[m.region_id]).filter(Boolean);
-    html += `<tr>
-      <td><b>${esc(u.name)}</b></td>
-      <td>${u.email ? esc(u.email)
-        : `<span style="color:var(--warn)">없음</span> <span class="hint">(${esc(u.username)})</span>`}</td>
-      <td>${roleLabel[u.role]||u.role}</td>
-      <td>${u.role==='super_admin'?'전체':(mine.join(', ')||'<span style="color:var(--warn)">없음</span>')}</td>
-      <td>${u.notify_email===false?'끔':'켬'}</td>
-      <td style="text-align:right"><button class="btn ghost" onclick="editUser('${u.id}')">수정</button></td>
-    </tr>`;
-  }
-  html += `</tbody></table>
-    <div class="actions"><button class="btn" onclick="editUser(null)">사용자 등록</button></div></div>`;
-  $('adminBody').innerHTML = html;
-}
-// 이메일 앞부분으로 아이디를 자동으로 채워 줍니다
-function autoUsername(){
-  const em=$('m_uemail'), un=$('m_ulogin');
-  if(!em||!un) return;
-  if(un.dataset.touched==='1') return;
-  const local = em.value.split('@')[0].trim();
-  un.value = local;
-}
-function editUser(id){
-  if(!isSuper()){ toast('사용자은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
-  const u = id ? S._ausers.find(x=>x.id===id) : null;
-  const mine = new Set(S._amaps.filter(m=>m.user_id===id).map(m=>m.region_id));
-  const tops = S._aregions.filter(r=>!r.parent_id);
-  let regHtml='';
-  for(const t of tops){
-    regHtml += `<label style="display:block;font-weight:600;margin-top:6px">
-      <input type="checkbox" name="ur" value="${t.id}" ${mine.has(t.id)?'checked':''}> ${esc(t.name)}</label>`;
-    for(const c of S._aregions.filter(r=>r.parent_id===t.id)){
-      regHtml += `<label style="display:block;margin-left:18px;font-weight:400">
-        <input type="checkbox" name="ur" value="${c.id}" ${mine.has(c.id)?'checked':''}> ${esc(c.name)}</label>`;
-    }
-  }
-  modal(u?'사용자 수정':'사용자 등록', `
-    <div class="grid">
-      ${u?'':`<div class="field wide"><label>Auth UID<span class="req">*</span></label>
-        <input type="text" id="m_uid" placeholder="352a2063-e426-...">
-        <div class="hint">Authentication → Users 화면의 UID를 복사해 넣으세요</div></div>`}
-      <div class="field"><label>이름<span class="req">*</span></label>
-        <input type="text" id="m_uname" value="${esc(u?.name||'')}"></div>
-      <div class="field"><label>이메일<span class="req">*</span></label>
-        <input type="email" id="m_uemail" value="${esc(u?.email||'')}"
-          placeholder="name@example.com" oninput="autoUsername()">
-        <div class="hint">Auth 계정과 같은 주소여야 로그인됩니다</div></div>
-      <div class="field"><label>아이디</label>
-        <input type="text" id="m_ulogin" value="${esc(u?.username||'')}"
-          placeholder="이메일에서 자동으로 만듭니다" oninput="this.dataset.touched='1'">
-        <div class="hint">비워 두면 이메일 앞부분을 씁니다</div></div>
-      <div class="field"><label>알림 메일</label>
-        <select id="m_unotify">
-          <option value="true" ${!u||u.notify_email!==false?'selected':''}>받기 (고위험군·주간 리포트)</option>
-          <option value="false" ${u&&u.notify_email===false?'selected':''}>받지 않기</option></select></div>
-      <div class="field wide"><label>권한</label>
-        <select id="m_urole" onchange="document.getElementById('regPick').style.display=this.value==='super_admin'?'none':''">
-          <option value="counselor" ${u?.role==='counselor'?'selected':''}>상담사</option>
-          <option value="manager" ${u?.role==='manager'?'selected':''}>중간관리자</option>
-          <option value="super_admin" ${u?.role==='super_admin'?'selected':''}>최종관리자</option>
-        </select></div>
-      <div class="field wide" id="regPick" style="${u?.role==='super_admin'?'display:none':''}">
-        <label>담당 지역</label>
-        <div class="checks" style="display:block">${regHtml||'<span class="hint">지역을 먼저 만드세요</span>'}</div>
-        <div class="hint">상위지역을 고르면 그 아래 하위지역도 함께 볼 수 있습니다.
-          지역을 하나도 고르지 않으면 아무 데이터도 보이지 않습니다.</div></div>
-    </div>`,
-    async ()=>{
-      const name=$('m_uname').value.trim();
-      const email=$('m_uemail').value.trim().toLowerCase();
-      let username=$('m_ulogin').value.trim();
-      const role=$('m_urole').value;
-      const notify_email=$('m_unotify').value==='true';
-      if(!name){ toast('이름을 입력하세요','bad'); focusMissing($('m_uname')); return false; }
-      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-        toast('이메일 주소를 정확히 입력하세요','bad'); focusMissing($('m_uemail')); return false;
-      }
-      if(!username) username = email.split('@')[0];
-      let userId=id;
-      if(u){
-        const { error } = await sb.from('users')
-          .update({ name, username, role, email, notify_email }).eq('id', u.id);
-        if(error){
-          toast(error.code==='23505'?'이미 쓰이고 있는 이메일 또는 아이디입니다'
-                                    :'저장하지 못했습니다: '+error.message,'bad');
-          return false;
-        }
-      }else{
-        const auth_user_id=$('m_uid').value.trim();
-        if(!/^[0-9a-f-]{36}$/i.test(auth_user_id)){ toast('Auth UID 형식이 올바르지 않습니다','bad'); return false; }
-        const { data, error } = await sb.from('users')
-          .insert({ auth_user_id, name, username, role, email, notify_email }).select('id').single();
-        if(error){
-          toast(error.code==='23505'?'이미 등록된 계정·이메일·아이디입니다':'등록하지 못했습니다: '+error.message,'bad');
-          return false;
-        }
-        userId = data.id;
-      }
-      const picked=[...document.querySelectorAll('input[name="ur"]:checked')].map(x=>x.value);
-      await sb.from('user_regions').delete().eq('user_id', userId);
-      if(role!=='super_admin' && picked.length){
-        await sb.from('user_regions').insert(picked.map(r=>({ user_id:userId, region_id:r })));
-      }
-      toast(u?'사용자를 수정했습니다':'사용자를 등록했습니다');
-      adminUsers(); return true;
-    });
-}
+    <div class="desc">${isSuper()
+      ? '계정을 만들고 비밀번호를 정해 줍니다. 아이디와 비밀번호만 알려 주면 바로 쓸 수 있습니다.'
+      : '담당 지역의 상담사 계정을 만들고 관리합니다. 관리자 계정은 최종관리자가 다룹니다.'}</div>
+    ${apiBase() ? '' : `<div class="msg bad">백엔드 주소가 없어 계정을 만들 수 없습니다.
+      simony.html 맨 위의 API_URL을 확인해 주세요.</div>`}
+    <div class="rec-list">`;
 
-/* ── 소속과 직급 (마스터 목록) ── */
-async function adminMaster(){
-  await loadLookups();
-  const tops = S.regions;
-  let html = `<div class="panel">
-    <h2>상세소속 (부서)</h2>
-    <div class="desc">여기 넣은 목록이 내담자 등록 화면의 부서 선택지가 됩니다.
-      지역을 고르면 그 지역 목록만 나옵니다.</div>
-    ${isSuper() ? '' : `<div class="msg info">직급·직무 목록은 모든 지역이 함께 쓰기 때문에
-      최종관리자가 관리합니다. 추가할 것이 있으면 말씀해 주세요.</div>`}
-    <div class="grid"><div class="field">
-      <label>지역</label>
-      <select id="mst_region" onchange="S._mstRegion=this.value;adminMaster()">
-        ${tops.map(r=>`<option value="${r.id}"
-          ${r.id===S._mstRegion?'selected':''}>${esc(r.name)}</option>`).join('')}
-      </select></div></div>`;
-
-  const rid = S._mstRegion || tops[0]?.id;
-  S._mstRegion = rid;
-  const list = S.depts.filter(d=>d.region_id===rid);
-  html += `<table><thead><tr><th>부서 이름</th><th>순서</th><th>상태</th><th></th></tr></thead><tbody>`;
-  if(!list.length) html += `<tr><td colspan="4"><div class="empty">
-    이 지역의 부서가 없습니다. 아래에서 추가하세요.</div></td></tr>`;
-  list.forEach(d=>{
-    html += `<tr><td><b>${esc(d.name)}</b></td><td>${d.sort_order}</td>
-      <td>${d.is_active?'사용 중':'중지'}</td>
-      <td style="text-align:right">
-        <button class="btn ghost" onclick="editDept('${d.id}')">수정</button>
-        <button class="btn ghost" onclick="delDept('${d.id}')">삭제</button></td></tr>`;
-  });
-  html += `</tbody></table>
-    <div class="actions">
-      <button class="btn" onclick="editDept(null)">부서 추가</button>
-      <button class="btn ghost" onclick="bulkDept()">여러 개 한번에 추가</button>
-    </div></div>`;
-
-  // 직급·직무는 전 지역 공용이라 최종관리자만 고칩니다
-  for(const [type,label] of (isSuper() ? [['rank','직급'],['duty','직무']] : [])){
-    const items = S.codes[type]||[];
-    html += `<div class="panel"><h2>${label}</h2>
-      <div class="desc">전 지역 공용 목록입니다.</div>
-      <table><thead><tr><th>${label} 이름</th><th>순서</th><th>상태</th><th></th></tr></thead><tbody>`;
-    if(!items.length) html += `<tr><td colspan="4"><div class="empty">목록이 없습니다.</div></td></tr>`;
-    items.forEach(c=>{
-      html += `<tr><td><b>${esc(c.label)}</b></td><td>${c.sort_order}</td>
-        <td>${c.is_active?'사용 중':'중지'}</td>
-        <td style="text-align:right">
-          <button class="btn ghost" onclick="editCode('${type}','${c.id}')">수정</button>
-          <button class="btn ghost" onclick="delCode('${c.id}')">삭제</button></td></tr>`;
-    });
-    html += `</tbody></table><div class="actions">
-      <button class="btn" onclick="editCode('${type}',null)">${label} 추가</button></div></div>`;
-  }
-  $('adminBody').innerHTML = html;
-}
-
-function editDept(id){
-  const d = id ? S.depts.find(x=>x.id===id) : null;
-  modal(d?'부서 수정':'부서 추가', `
-    <div class="field"><label>부서 이름<span class="req">*</span></label>
-      <input type="text" id="m_dname" value="${esc(d?.name||'')}" placeholder="예: 의창소방서"></div>
-    <div class="grid" style="margin-top:12px">
-      <div class="field"><label>순서</label>
-        <input type="number" id="m_dsort" value="${d?.sort_order??10}"></div>
-      <div class="field"><label>상태</label>
-        <select id="m_dactive">
-          <option value="true" ${!d||d.is_active?'selected':''}>사용 중</option>
-          <option value="false" ${d&&!d.is_active?'selected':''}>중지</option></select></div>
-    </div>`,
-    async ()=>{
-      const name=$('m_dname').value.trim();
-      if(!name){ toast('부서 이름을 입력하세요','bad'); return false; }
-      const row={ name, sort_order:Number($('m_dsort').value)||10,
-                  is_active:$('m_dactive').value==='true' };
-      let error;
-      if(d){ ({ error } = await sb.from('departments').update(row).eq('id',d.id)); }
-      else { row.region_id = S._mstRegion; ({ error } = await sb.from('departments').insert(row)); }
-      if(error){
-        toast(error.code==='23505'?'같은 이름의 부서가 이미 있습니다':'저장하지 못했습니다: '+error.message,'bad');
-        return false;
-      }
-      toast('부서를 저장했습니다'); adminMaster(); return true;
-    });
-}
-function bulkDept(){
-  modal('부서 여러 개 추가', `
-    <div class="field"><label>부서 이름 (한 줄에 하나)</label>
-      <textarea id="m_bulk" style="min-height:150px"
-        placeholder="창원소방본부&#10;의창소방서&#10;성산소방서"></textarea>
-      <div class="hint">이미 있는 이름은 건너뜁니다</div></div>`,
-    async ()=>{
-      const names=$('m_bulk').value.split('\n').map(x=>x.trim()).filter(Boolean);
-      if(!names.length){ toast('추가할 이름을 입력하세요','bad'); return false; }
-      const exist=new Set(S.depts.filter(d=>d.region_id===S._mstRegion).map(d=>d.name));
-      const rows=names.filter(n=>!exist.has(n))
-        .map((n,i)=>({ region_id:S._mstRegion, name:n, sort_order:(i+1)*10 }));
-      if(!rows.length){ toast('모두 이미 등록된 부서입니다','bad'); return false; }
-      const { error } = await sb.from('departments').insert(rows);
-      if(error){ toast('저장하지 못했습니다: '+error.message,'bad'); return false; }
-      toast(`부서 ${rows.length}개를 추가했습니다`); adminMaster(); return true;
-    });
-}
-async function delDept(id){
-  const d=S.depts.find(x=>x.id===id);
-  if(!confirm(`'${d.name}' 부서를 목록에서 지웁니다.\n이미 저장된 기록의 값은 그대로 남습니다. 계속할까요?`)) return;
-  const { error } = await sb.from('departments').delete().eq('id',id);
-  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
-  toast('부서를 지웠습니다'); adminMaster();
-}
-function editCode(type,id){
-  if(!isSuper()){ toast('직급·직무은(는) 최종관리자만 다룰 수 있습니다','bad'); return; }
-  const c = id ? (S.codes[type]||[]).find(x=>x.id===id) : null;
-  const label = type==='rank'?'직급':'직무';
-  modal(c?label+' 수정':label+' 추가', `
-    <div class="field"><label>${label} 이름<span class="req">*</span></label>
-      <input type="text" id="m_clabel" value="${esc(c?.label||'')}"></div>
-    <div class="grid" style="margin-top:12px">
-      <div class="field"><label>순서</label>
-        <input type="number" id="m_csort" value="${c?.sort_order??10}"></div>
-      <div class="field"><label>상태</label>
-        <select id="m_cactive">
-          <option value="true" ${!c||c.is_active?'selected':''}>사용 중</option>
-          <option value="false" ${c&&!c.is_active?'selected':''}>중지</option></select></div>
-    </div>`,
-    async ()=>{
-      const lab=$('m_clabel').value.trim();
-      if(!lab){ toast('이름을 입력하세요','bad'); return false; }
-      const row={ label:lab, sort_order:Number($('m_csort').value)||10,
-                  is_active:$('m_cactive').value==='true' };
-      let error;
-      if(c){ ({ error } = await sb.from('code_options').update(row).eq('id',c.id)); }
-      else { row.code_type=type; ({ error } = await sb.from('code_options').insert(row)); }
-      if(error){
-        toast(error.code==='23505'?'같은 이름이 이미 있습니다':'저장하지 못했습니다: '+error.message,'bad');
-        return false;
-      }
-      toast('저장했습니다'); adminMaster(); return true;
-    });
-}
-async function delCode(id){
-  if(!isSuper()){ toast('직급·직무는 최종관리자만 다룰 수 있습니다','bad'); return; }
-  if(!confirm('목록에서 지웁니다. 이미 저장된 기록의 값은 그대로 남습니다. 계속할까요?')) return;
-  const { error } = await sb.from('code_options').delete().eq('id',id);
-  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
-  toast('지웠습니다'); adminMaster();
-}
-
-/* ── 내담자 DB: 템플릿 받기 + 인사이동 동기화 ── */
-function adminSync(){
-  const api = apiBase();
-  const rid = S._syncRegion || S.regions[0]?.id;
-  S._syncRegion = rid;
-  $('adminBody').innerHTML = `
-  <div class="panel">
-    <h2>백엔드 주소</h2>
-    <div class="desc">템플릿 생성과 인사이동 대조는 서버가 처리합니다.
-      Cloud Run 주소를 한 번만 등록해 두세요.</div>
-    ${API_URL ? `<div class="msg info">파일에 <b>${esc(API_URL)}</b> 로 정해져 있습니다.
-        바꾸려면 simony.html 맨 위의 API_URL 값을 고쳐 주세요.</div>`
-      : `<div class="searchbar">
-        <input type="text" id="apiUrl" value="${esc(api)}"
-          placeholder="https://simony-api-xxxx.run.app">
-        <button class="btn" onclick="saveApi()">저장</button>
-      </div>`}
-    ${api?'':'<div class="msg bad" style="margin-top:12px">주소가 없어 아래 기능이 동작하지 않습니다.</div>'}
-  </div>
-
-  <div class="panel">
-    <h2>① 명부 양식 내려받기</h2>
-    <div class="desc">해당 지역의 직급·직무 목록이 들어간 엑셀을 만들어 줍니다.
-      인사담당자에게 이 파일을 보내면 표기가 어긋나지 않습니다.</div>
-    <div class="msg info"><b>상위지역(예: 경남소방, 창원소방)</b>을 고르세요.
-      그러면 그 아래 소방서 목록이 안내에 함께 담깁니다.
-      소방서 하나를 고르면 그 소방서만을 위한 양식이 됩니다.</div>
-    <div class="grid">
-      <div class="field"><label>지역</label>
-        <select id="sync_region" onchange="S._syncRegion=this.value;showSyncTarget()">
-          ${regionOptionsHTML(rid)}
-        </select></div>
-    </div>
-    <div id="tplNote"></div>
-    <div class="actions"><button class="btn" onclick="downloadTemplate()">엑셀 양식 받기</button></div>
-  </div>
-
-  <div class="panel">
-    <h2>② 받은 명부 올리기 (인사이동 반영)</h2>
-    <div class="desc">사번을 기준으로 기존 명부와 맞춰 봅니다.
-      명단에서 빠진 사람은 <b>지우지 않고</b> 전출로만 바꾸므로 과거 상담 기록은 그대로 남습니다.</div>
-    <div class="msg info">위에서 <b>상위지역(예: 경남소방)</b>을 고르면,
-      엑셀의 '소속' 칸을 보고 소방서별로 알아서 나눠 넣습니다.
-      본부에서 전 소방서 인원을 한 파일로 받았을 때 이렇게 쓰시면 됩니다.
-      <div class="hint" style="margin-top:6px;color:inherit">
-        '경상남도 진주소방서 119구조대' → 지역은 <b>진주소방서</b>, 세부소속은 <b>119구조대</b>로 나뉩니다.
-        식별번호는 개인식별아이디를 먼저 쓰고, 없으면 디지털 식별번호를 씁니다.</div></div>
-    <div id="syncTargetNote" class="msg ${''}" style="margin-top:12px"></div>
-    <div class="dropzone" id="dz_sync"
-      ondragover="event.preventDefault();this.classList.add('over')"
-      ondragleave="this.classList.remove('over')"
-      ondrop="event.preventDefault();this.classList.remove('over');pickSyncFile(event.dataTransfer.files[0])"
-      onclick="document.getElementById('syncFile').click()">
-      <b>엑셀 파일을 여기에 끌어다 놓으세요</b>
-      <span>또는 눌러서 파일 고르기 (.xlsx)</span>
-    </div>
-    <input type="file" id="syncFile" class="hidden" accept=".xlsx,.xls"
-      onchange="pickSyncFile(this.files[0])">
-    <div id="syncPreview"></div>
-  </div>`;
-  showSyncTarget();
-}
-// 지금 고른 지역으로 어떻게 들어가는지 알려 줍니다
-function showSyncTarget(){
-  const box = $('syncTargetNote');
-  const id = $('sync_region')?.value || S._syncRegion;
-  S._syncRegion = id;
-  const r = S.allRegions.find(x=>x.id===id);
-
-  // 양식 받기 쪽 안내
-  const tpl = $('tplNote');
-  if(tpl && r){
-    tpl.innerHTML = r.parent_id
-      ? `<div class="msg bad" style="margin-top:12px">
-          <b>${esc(r.name)}</b>는 소방서 하나입니다. 이 소방서만을 위한 양식이 만들어집니다.
-          <div class="hint" style="color:inherit;margin-top:4px">
-            여러 소방서가 담긴 명부를 받으실 거라면 위에서
-            <b>${esc(S.allRegions.find(x=>x.id===r.parent_id)?.name || '상위지역')}</b>을 골라 주세요.</div></div>`
-      : `<div class="msg info" style="margin-top:12px">
-          <b>${esc(r.name)}</b> 전체용 양식입니다. 안내 시트에 소방서 목록이 함께 담깁니다.</div>`;
-  }
-
-  if(!box) return;
-  if(!r){ box.innerHTML=''; return; }
-  if(!r.parent_id){
-    const kids = S.allRegions.filter(x=>x.parent_id===r.id);
-    box.className = 'msg info';
-    box.innerHTML = `<b>${esc(r.name)}</b>의 소방서 ${kids.length}곳으로 나눠 넣습니다.`
-      + (kids.length ? `<div class="hint" style="color:inherit;margin-top:4px">${
-          kids.map(k=>esc(k.name)).join(' · ')}</div>`
-        : `<div class="hint" style="color:var(--warn);margin-top:4px">
-            아직 소방서가 없습니다. 관리 → 지역에서 먼저 추가해 주세요.</div>`);
+  if(!visible.length){
+    html += `</div><div class="empty">아직 등록된 사람이 없습니다.</div>`;
   }else{
-    box.className = 'msg info';
-    box.innerHTML = `명단 전체가 <b>${esc(r.name)}</b> 한 곳으로 들어갑니다.
-      <div class="hint" style="color:inherit;margin-top:4px">
-        여러 소방서가 섞인 파일이라면 위에서 상위지역을 골라 주세요.</div>`;
-  }
-}
-
-function saveApi(){
-  const v=$('apiUrl').value.trim().replace(/\/$/,'');
-  localStorage.setItem('sb_api', v);
-  toast(v?'백엔드 주소를 저장했습니다':'백엔드 주소를 지웠습니다');
-  adminSync();
-}
-async function downloadTemplate(){
-  const rid=$('sync_region').value;
-  try{
-    toast('양식을 만드는 중입니다…');
-    const res = await apiCall(`/api/clients/template?region_id=${encodeURIComponent(rid)}`);
-    const blob = await res.blob();
-    const name = (S.regions.find(r=>r.id===rid)?.name||'지역')+'_내담자명부_양식.xlsx';
-    const url = URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=name; a.click();
-    URL.revokeObjectURL(url);
-    toast('양식을 내려받았습니다');
-  }catch(e){ toast(e.message,'bad'); }
-}
-// 고른 지역이 상위지역이면 소속 칸을 보고 자동으로 나눕니다
-function isParentRegion(id){
-  const r = S.allRegions.find(x=>x.id===id);
-  return !!(r && !r.parent_id);
-}
-async function pickSyncFile(file){
-  if(!file) return;
-  S._syncFile = file;
-  const box=$('syncPreview');
-  box.innerHTML=`<div class="empty">${esc(file.name)} 을(를) 살펴보는 중…</div>`;
-  try{
-    const fd=new FormData();
-    fd.append('file', file);
-    fd.append('region_id', S._syncRegion);
-    fd.append('auto_assign', isParentRegion(S._syncRegion) ? 'true' : 'false');
-    const res = await apiCall('/api/clients/sync/preview', { method:'POST', body:fd });
-    const p = await res.json();
-    S._syncPlan = p;
-    renderSyncPreview(p, file.name);
-  }catch(e){
-    box.innerHTML=`<div class="msg bad">${esc(e.message)}</div>`;
-  }
-}
-function renderSyncPreview(p, filename){
-  const g = (title, rows, cols, kind) => {
-    if(!rows.length) return `<div class="panel"><h2>${title} 0명</h2>
-      <div class="empty">해당하는 사람이 없습니다.</div></div>`;
-    return `<div class="panel"><h2>${title} <span class="cnt">${rows.length}명</span></h2>
-      <div class="scroll-x" style="max-height:360px;overflow-y:auto"><table class="grid-table"><thead><tr>
-      ${cols.map(c=>`<th class="nowrap">${esc(c[0])}</th>`).join('')}</tr></thead><tbody>
-      ${rows.map(r=>`<tr>${cols.map((c,ci)=>
-        `<td class="${ci===0?'g-first nowrap':'nowrap'}">${esc(c[1](r)??'')}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div></div>`;
-  };
-  const byRegion = Object.entries(p.by_region || {}).sort((a,b)=>b[1]-a[1]);
-  const unknown = Object.entries(p.unknown_depts || {}).sort((a,b)=>b[1]-a[1]);
-
-  $('syncPreview').innerHTML = `
-    <div class="cards" style="margin-top:16px">
-      ${card('엑셀 행', (p.total||0)+'행')}
-      ${card('신규 전입', (p.created?.length||0)+'명')}
-      ${card('정보 변경', (p.updated?.length||0)+'명')}
-      ${card('전출·퇴직', (p.left?.length||0)+'명', (p.left?.length||0)>0)}
-    </div>
-    ${byRegion.length ? `<div class="panel"><h2>소방서별 배정</h2>
-      <div class="desc">엑셀의 '소속' 칸을 보고 이렇게 나눠 넣습니다.</div>
-      ${barList(byRegion)}</div>` : ''}
-    ${unknown.length ? `<div class="panel" style="border-color:var(--warn)">
-      <h2 style="color:var(--warn)">어느 소방서인지 알 수 없는 소속</h2>
-      <div class="desc">아래 이름은 지역 목록에 없습니다.
-        관리 → 지역에서 추가하거나, 엑셀의 소속 이름을 고쳐 주세요.</div>
-      ${barList(unknown)}</div>` : ''}
-    ${(p.warnings||[]).length ? `<div class="panel" style="border-color:var(--warn)">
-      <h2 style="color:var(--warn)">확인해 주세요</h2>
-      ${p.warnings.map(w=>`<div class="msg bad">${esc(w)}</div>`).join('')}
-      <div class="hint">막지는 않습니다. 이대로 반영해도 되지만, 한 번 확인하시는 편이 좋습니다.</div>
-    </div>` : ''}
-    ${p.errors?.length ? `<div class="panel" style="border-color:var(--warn)">
-      <h2 style="color:var(--warn)">확인이 필요한 행 ${p.errors.length}개</h2>
-      <div class="desc">아래 행은 반영하지 않습니다. 엑셀을 고친 뒤 다시 올려 주세요.</div>
-      <div style="overflow:auto;max-height:240px"><table><thead><tr>
-        <th>엑셀 행</th><th>이름</th><th>문제</th></tr></thead><tbody>
-        ${p.errors.map(e=>`<tr><td>${e.row}</td><td>${esc(e.name||'')}</td>
-          <td style="color:var(--warn)">${esc(e.reason)}</td></tr>`).join('')}
-      </tbody></table></div></div>` : ''}
-    ${g('신규 전입', p.created||[], [
-      ['이름', r=>r.name],
-      ['개인식별아이디', r=>r.personal_id],
-      ['디지털 식별번호', r=>r.digital_id],
-      ['사번', r=>r.employee_no],
-      ['생년월일', r=>r.birth_date], ['성별', r=>r.gender],
-      ['소속 소방서', r=>r.department], ['세부소속', r=>r.team],
-      ['직급', r=>r.rank], ['직무', r=>r.duty]])}
-    ${g('정보 변경', p.updated||[], [
-      ['이름', r=>r.name],
-      ['개인식별아이디', r=>r.row?.personal_id],
-      ['디지털 식별번호', r=>r.row?.digital_id],
-      ['사번', r=>r.employee_no],
-      ['바뀌는 내용', r=>(r.changes||[]).map(c=>`${c.label} ${c.from||'(없음)'} → ${c.to}`).join(', ')]])}
-    ${(() => {
-      const moved = (p.updated||[]).filter(u=>(u.changes||[]).some(c=>c.key==='region_id'));
-      return moved.length ? g('소방서를 옮긴 사람', moved, [
-        ['이름', r=>r.name],
-        ['개인식별아이디', r=>r.row?.personal_id],
-        ['사번', r=>r.employee_no],
-        ['이동', r=>{ const c=(r.changes||[]).find(x=>x.key==='region_id');
-          return c ? `${c.from||'(없음)'} → ${c.to}` : ''; }]]) : '';
-    })()}
-    ${g('명단에서 빠짐 (전출 처리)', p.left||[], [
-      ['이름', r=>r.name],
-      ['개인식별아이디', r=>r.personal_id],
-      ['디지털 식별번호', r=>r.digital_id],
-      ['사번', r=>r.employee_no],
-      ['현재 소속', r=>r.department], ['상담 기록', r=>(r.record_count??0)+'건']])}
-    <div class="panel">
-      <div class="msg info">전출로 바뀐 사람도 데이터는 남습니다.
-        목록에서만 숨겨지고, 이름으로 찾으면 과거 이력을 볼 수 있습니다.</div>
-      <div class="actions">
-        <button class="btn" id="syncApply" onclick="applySync()">이대로 반영하기</button>
-        <button class="btn ghost" onclick="document.getElementById('syncPreview').innerHTML=''">취소</button>
-      </div></div>`;
-}
-async function applySync(){
-  const btn=$('syncApply');
-  if(!S._syncFile){ toast('올린 파일이 없습니다','bad'); return; }
-  if(!confirm('미리 본 내용대로 명부를 갱신합니다. 계속할까요?')) return;
-  btn.disabled=true; btn.textContent='반영 중…';
-  try{
-    const fd=new FormData();
-    fd.append('file', S._syncFile);
-    fd.append('region_id', S._syncRegion);
-    fd.append('auto_assign', isParentRegion(S._syncRegion) ? 'true' : 'false');
-    fd.append('user_id', S.me.id);
-    const res = await apiCall('/api/clients/sync/apply', { method:'POST', body:fd });
-    const r = await res.json();
-    $('syncPreview').innerHTML = `<div class="panel">
-      <h2>반영을 마쳤습니다</h2>
-      <div class="cards">
-        ${card('신규 등록', (r.created||0)+'명')}
-        ${card('정보 변경', (r.updated||0)+'명')}
-        ${card('전출 처리', (r.left||0)+'명')}
-        ${card('변화 없음', (r.unchanged||0)+'명')}
-      </div>
-      ${Object.keys(r.by_region||{}).length ? `<h2 style="margin-top:18px">소방서별</h2>
-        ${barList(Object.entries(r.by_region).sort((a,b)=>b[1]-a[1]))}` : ''}
-      <div class="actions"><button class="btn ghost" onclick="adminSync()">닫기</button></div></div>`;
-    toast('명부를 갱신했습니다');
-  }catch(e){
-    toast(e.message,'bad');
-    btn.disabled=false; btn.textContent='이대로 반영하기';
-  }
-}
-
-/* ── 종합심리검사 PDF 올리기 ── */
-function adminUpload(){
-  $('adminBody').innerHTML = `
-  <div class="panel">
-    <h2>종합심리검사 결과 올리기</h2>
-    <div class="desc">PDF를 여러 장 한꺼번에 올리면 서버가 글자를 읽어
-      이름·생년월일·소속을 찾아내고, 명부와 대조해 파일 이름을 정리한 뒤 저장합니다.</div>
-    <div class="msg info">파일 이름은 <b>지역_이름_생년월일8자리.pdf</b> 형식이면 가장 정확합니다.
-      형식이 달라도 내용에서 찾아보지만, 못 찾으면 '확인 대기'로 남습니다.</div>
-    <div class="dropzone" id="dz_pdf"
-      ondragover="event.preventDefault();this.classList.add('over')"
-      ondragleave="this.classList.remove('over')"
-      ondrop="event.preventDefault();this.classList.remove('over');uploadPdfs(event.dataTransfer.files)"
-      onclick="document.getElementById('pdfFiles').click()">
-      <b>PDF 파일을 여기에 끌어다 놓으세요</b>
-      <span>여러 개를 한 번에 올릴 수 있습니다</span>
-    </div>
-    <input type="file" id="pdfFiles" class="hidden" accept="application/pdf" multiple
-      onchange="uploadPdfs(this.files)">
-    <div id="pdfResult"></div>
-  </div>`;
-}
-async function uploadPdfs(files){
-  if(!files || !files.length) return;
-  const box=$('pdfResult');
-  box.innerHTML=`<div class="empty">${files.length}개 파일을 읽고 분석하는 중입니다…
-    <br>장수에 따라 1분 이상 걸릴 수 있습니다.</div>`;
-  try{
-    const fd=new FormData();
-    [...files].forEach(f=>fd.append('files', f));
-    fd.append('user_id', S.me.id);
-    const res = await apiCall('/api/comp-tests/upload', { method:'POST', body:fd });
-    const r = await res.json();
-    const okCnt=(r.results||[]).filter(x=>x.status==='matched').length;
-    const pendCnt=(r.results||[]).filter(x=>x.status==='pending').length;
-    const failCnt=(r.results||[]).filter(x=>x.status==='failed').length;
-    box.innerHTML = `<div class="cards" style="margin-top:16px">
-        ${card('자동 연결', okCnt+'건')}
-        ${card('확인 대기', pendCnt+'건', pendCnt>0)}
-        ${card('실패', failCnt+'건', failCnt>0)}
-      </div>
-      <div style="overflow:auto"><table><thead><tr>
-        <th>원본 파일</th><th>바뀐 이름</th><th>이름</th><th>생년월일</th>
-        <th>위험도</th><th>결과</th></tr></thead><tbody>
-        ${(r.results||[]).map(x=>`<tr>
-          <td style="font-size:13px">${esc(x.original)}</td>
-          <td style="font-size:13px">${esc(x.renamed||'—')}</td>
-          <td><b>${esc(x.name||'—')}</b></td>
-          <td>${esc(x.birth_date||'—')}</td>
-          <td>${esc(x.risk_level||'—')}</td>
-          <td>${x.status==='matched'?'연결됨'
-              :x.status==='pending'?'<span style="color:var(--warn)">확인 대기</span>'
-              :`<span style="color:var(--warn)">실패: ${esc(x.reason||'')}</span>`}</td>
-        </tr>`).join('')}
-      </tbody></table></div>
-      <div class="actions"><button class="btn ghost" onclick="showCompTests()">결과 목록 보기</button></div>`;
-  }catch(e){
-    box.innerHTML=`<div class="msg bad">${esc(e.message)}</div>`;
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   데이터 관리 — 엑셀처럼 훑어보고 그 자리에서 고치기
-   고친 내용은 DB 트리거가 자동으로 audit_logs에 남깁니다.
-   ═══════════════════════════════════════════════════ */
-// 무엇을 볼지 바꾸기
-function setGrid(opt){
-  if(opt.target!==undefined) S._gridTarget = opt.target;
-  if(opt.form!==undefined)   S._gridForm   = opt.form;
-  if(opt.region!==undefined) S._gridRegion = opt.region;
-  if(opt.q!==undefined)      S._gridQ      = opt.q;
-  if(opt.from!==undefined)   S._gridFrom   = opt.from;
-  if(opt.to!==undefined)     S._gridTo     = opt.to;
-  return adminGrid();
-}
-async function adminGrid(){
-  const target = S._gridTarget || 'records';
-  S._gridTarget = target;
-  const regionOpts = regionOptionsHTML(S._gridRegion, { plain:true });
-  const formOpts = `<option value="">전체 폼</option>` + S.forms.map(f=>
-    `<option value="${f.id}" ${f.id===S._gridForm?'selected':''}>${esc(f.title)}</option>`).join('');
-
-  $('adminBody').innerHTML = `<div class="panel">
-    <h2>통합 데이터 관리</h2>
-    <div class="desc">명부와 기록을 한 표에서 보고 그 자리에서 고칩니다.
-      고친 내용은 누가 언제 무엇을 바꿨는지 자동으로 남습니다.</div>
-    <div class="grid">
-      <div class="field"><label>무엇을 볼까요</label>
-        <select onchange="setGrid({target:this.value})">
-          <option value="records" ${target==='records'?'selected':''}>상담·업무 기록</option>
-          <option value="clients" ${target==='clients'?'selected':''}>내담자 명부</option>
-        </select></div>
-      ${target==='records' ? `<div class="field"><label>폼</label>
-        <select onchange="setGrid({form:this.value})">${formOpts}</select></div>` : ''}
-      <div class="field"><label>지역</label>
-        <select onchange="setGrid({region:this.value})">
-          <option value="">전체</option>${regionOpts}</select></div>
-      <div class="field"><label>이름</label>
-        <input type="text" id="g_q" value="${esc(S._gridQ||'')}" placeholder="이름 일부"
-          onkeydown="if(event.key==='Enter')setGrid({q:this.value})"></div>
-      ${target==='records' ? `
-      <div class="field"><label>시작일</label>
-        <input type="date" value="${esc(S._gridFrom||'')}"
-          onchange="setGrid({from:this.value})"></div>
-      <div class="field"><label>종료일</label>
-        <input type="date" value="${esc(S._gridTo||'')}"
-          onchange="setGrid({to:this.value})"></div>` : ''}
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="setGrid({q:document.getElementById('g_q').value})">불러오기</button>
-      <button class="btn ghost" onclick="setGrid({q:'',region:'',from:'',to:'',form:''})">조건 지우기</button>
-    </div>
-  </div><div id="gridBody"><div class="panel"><div class="empty">불러오는 중…</div></div></div>`;
-
-  if(target==='records') await gridRecords(); else await gridClients();
-}
-
-// 표 한 장을 그립니다. 셀 값은 모두 글자로만 넣어 구조가 깨지지 않게 합니다.
-function gridTable(headers, rows, onRowCall){
-  if(!rows.length) return '<div class="empty">조건에 맞는 자료가 없습니다.</div>';
-  const head = headers.map(h=>`<th class="nowrap">${esc(h)}</th>`).join('');
-  const body = rows.map((cells,i)=>
-    `<tr onclick="${onRowCall}(${i})">` +
-    cells.map((c,ci)=>`<td class="${ci===0?'g-first nowrap':''}">${esc(c==null?'':String(c))}</td>`).join('') +
-    `</tr>`).join('');
-  return `<div class="scroll-x"><table class="grid-table">
-    <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-}
-
-async function gridClients(){
-  let q = sb.from('clients').select('*').order('name').limit(1000);
-  if(S._gridRegion) q = q.eq('region_id', S._gridRegion);
-  if(S._gridQ) q = q.ilike('name', `%${S._gridQ}%`);
-  const { data, error } = await q;
-  if(error){ $('gridBody').innerHTML=`<div class="panel"><div class="msg bad">${esc(error.message)}</div></div>`; return; }
-  S._gridRows = data || [];
-  console.log('[시모니] 명부 그리드 →', S._gridRows.length, '명');
-  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
-
-  const rows = S._gridRows.map(c=>[
-    c.name, c.birth_date||'', c.gender||'',
-    c.personal_id||c.internal_id||'', c.digital_id||'', c.employee_no||'',
-    rname[c.region_id]||'', c.extra?.department||'', c.extra?.team||'',
-    c.extra?.rank||'', c.extra?.duty||'', c.status||'',
-  ]);
-  $('gridBody').innerHTML = `<div class="panel">
-    <h2>내담자 명부 <span class="cnt">${S._gridRows.length}명</span></h2>
-    <div class="desc">줄을 누르면 고칠 수 있습니다.</div>
-    ${gridTable(['이름','생년월일','성별','개인식별아이디','디지털 식별번호','사번',
-                 '지역','소속 소방서','세부소속','계급','직무','상태'], rows, 'editClientRow')}
-  </div>`;
-}
-
-async function gridRecords(){
-  const fid = S._gridForm || '';
-  let q = sb.from('form_records').select('*')
-    .order('created_at',{ascending:false}).limit(1000);
-  if(fid) q = q.eq('form_id', fid);
-  if(S._gridRegion) q = q.eq('region_id', S._gridRegion);
-  if(S._gridQ) q = q.ilike('client_name', `%${S._gridQ}%`);
-  if(S._gridFrom) q = q.gte('created_at', S._gridFrom);
-  if(S._gridTo)   q = q.lte('created_at', S._gridTo + 'T23:59:59');
-  const { data, error } = await q;
-  if(error){ $('gridBody').innerHTML=`<div class="panel"><div class="msg bad">${esc(error.message)}</div></div>`; return; }
-  S._gridRows = data || [];
-  console.log('[시모니] 기록 그리드 →', S._gridRows.length, '건');
-
-  // 한 폼만 볼 때는 그 폼의 항목을 열로 펼칩니다
-  let extraCols = [];
-  if(fid){
-    const { data: ff } = await sb.from('form_fields').select('*')
-      .eq('form_id', fid).order('sort_order');
-    S._gridFields = ff || [];
-    extraCols = (ff||[]).filter(f=>f.field_type!=='file' && f.field_type!=='textarea').slice(0,8);
-  }else{
-    S._gridFields = [];
-  }
-
-  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
-  const fname={}; S.forms.forEach(f=>fname[f.id]=f.title);
-
-  const headers = ['작성일','폼','지역','내담자','작성자', ...extraCols.map(f=>f.label)];
-  const rows = S._gridRows.map(r=>[
-    fmtDate(r.created_at), fname[r.form_id]||'', rname[r.region_id]||'',
-    r.client_name||'', r.author_name||'',
-    ...extraCols.map(f=>cellText(r.data?.[f.field_key])),
-  ]);
-
-  $('gridBody').innerHTML = `<div class="panel">
-    <h2>${fid ? esc(fname[fid]) : '전체'} 기록 <span class="cnt">${S._gridRows.length}건</span></h2>
-    <div class="desc">줄을 누르면 항목별로 고칠 수 있습니다.
-      ${fid ? '' : '폼을 하나 고르면 그 폼의 항목이 열로 펼쳐집니다.'}</div>
-    ${gridTable(headers, rows, 'editRecordRow')}
-  </div>`;
-}
-
-// 내담자 한 줄 고치기
-function editClientRow(i){
-  const c = S._gridRows[i];
-  modal(`${c.name} 정보 고치기`, `
-    <div class="grid">
-      <div class="field"><label>이름<span class="req">*</span></label>
-        <input type="text" id="e_name" value="${esc(c.name||'')}"></div>
-      <div class="field"><label>생년월일<span class="req">*</span></label>
-        ${birthInputHTML('e_birth', c.birth_date||'')}</div>
-      <div class="field"><label>성별</label>
-        <select id="e_gender">
-          <option value="">— 선택 —</option>
-          <option ${c.gender==='남'?'selected':''}>남</option>
-          <option ${c.gender==='여'?'selected':''}>여</option></select></div>
-      <div class="field"><label>재직상태</label>
-        <select id="e_status">
-          ${['재직','휴직','전출','퇴직'].map(x=>
-            `<option ${c.status===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="field"><label>개인식별아이디</label>
-        <input type="text" id="e_pid" value="${esc(c.personal_id||c.internal_id||'')}"></div>
-      <div class="field"><label>디지털 식별번호</label>
-        <input type="text" id="e_did" value="${esc(c.digital_id||'')}"></div>
-      <div class="field"><label>사번</label>
-        <input type="text" id="e_emp" value="${esc(c.employee_no||'')}"></div>
-      <div class="field"><label>소속 소방서</label>
-        <input type="text" id="e_dept" value="${esc(c.extra?.department||'')}"></div>
-      <div class="field"><label>세부소속(팀·센터)</label>
-        <input type="text" id="e_team" value="${esc(c.extra?.team||'')}"></div>
-      <div class="field"><label>계급</label>
-        <input type="text" id="e_rank" value="${esc(c.extra?.rank||'')}"></div>
-      <div class="field"><label>직무</label>
-        <input type="text" id="e_duty" value="${esc(c.extra?.duty||'')}"></div>
-    </div>
-    <div class="msg info" style="margin-top:14px">고친 내용은 누가 언제 무엇을 바꿨는지 자동으로 남습니다.
-      ${isSuper() ? '' : '<br>담당 지역 밖으로는 옮길 수 없습니다.'}</div>`,
-    async ()=>{
-      const name=$('e_name').value.trim();
-      const birth=normalizeBirth($('e_birth').value);
-      if(!name){ toast('이름을 입력하세요','bad'); return false; }
-      if(!birth){ toast('생년월일을 숫자 8자리로 입력하세요','bad'); return false; }
-      const extra = Object.assign({}, c.extra||{}, {
-        department: $('e_dept').value.trim() || null,
-        team:       $('e_team').value.trim() || null,
-        rank:       $('e_rank').value.trim() || null,
-        duty:       $('e_duty').value.trim() || null,
-      });
-      const pid = $('e_pid').value.trim();
-      const did = $('e_did').value.trim();
-      const emp = $('e_emp').value.trim();
-      if(!pid && !did && !emp){
-        toast('개인식별아이디·디지털 식별번호·사번 가운데 하나는 있어야 합니다','bad');
-        return false;
-      }
-      const patch = {
-        name, birth_date: birth,
-        gender: $('e_gender').value || null,
-        status: $('e_status').value,
-        personal_id: pid || null,
-        digital_id: did || null,
-        employee_no: emp || null,
-        internal_id: pid || did || emp,
-        extra,
-      };
-      if(patch.status !== c.status) patch.status_changed_at = new Date().toISOString();
-      const { error } = await sb.from('clients').update(patch).eq('id', c.id);
-      if(error){ toast('고치지 못했습니다: '+error.message,'bad'); return false; }
-      toast('고쳤습니다. 변경 이력에 남았습니다');
-      adminGrid(); return true;
-    });
-}
-
-// 기록 한 줄 고치기 — 폼 정의를 그대로 읽어 입력칸을 만든다
-async function editRecordRow(i){
-  const r = S._gridRows[i];
-  // 전체 폼을 보고 있을 때는 이 기록이 속한 폼의 항목을 그때 불러옵니다
-  let fields = (S._gridFields||[]).filter(f=>f.is_active!==false);
-  if(!fields.length || fields[0].form_id !== r.form_id){
-    const { data } = await sb.from('form_fields').select('*')
-      .eq('form_id', r.form_id).order('sort_order');
-    fields = (data||[]).filter(f=>f.is_active!==false);
-  }
-  const body = fields.map(f=>{
-    const id='e_f_'+f.field_key;
-    const v = r.data?.[f.field_key];
-    const lab = `<label>${esc(f.label)}</label>`;
-    if(f.field_type==='textarea')
-      return `<div class="field wide">${lab}<textarea id="${id}">${esc(v||'')}</textarea></div>`;
-    if(f.field_type==='multiselect'){
-      const cur = new Set(Array.isArray(v)?v:(v?[v]:[]));
-      return `<div class="field wide">${lab}<div class="checks">${
-        (f.options||[]).map(o=>`<label><input type="checkbox" name="${id}"
-          value="${esc(o)}" ${cur.has(o)?'checked':''}> ${esc(o)}</label>`).join('')
-      }</div></div>`;
-    }
-    if(f.field_type==='select'){
-      const list = f.lookup_source ? lookupOptions(f.lookup_source, r.region_id) : (f.options||[]);
-      const known = list.includes(v);
-      return `<div class="field">${lab}<select id="${id}">
-        <option value="">— 선택 —</option>
-        ${list.map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}
-        ${(!known && v)?`<option selected>${esc(v)}</option>`:''}
-      </select></div>`;
-    }
-    if(f.field_type==='number')
-      return `<div class="field">${lab}<input type="number" id="${id}" value="${esc(v??'')}"></div>`;
-    if(f.field_type==='date')
-      return `<div class="field">${lab}<input type="date" id="${id}" value="${esc(v||'')}"></div>`;
-    if(f.field_type==='time')
-      return `<div class="field">${lab}<input type="time" id="${id}" value="${esc(v||'')}"></div>`;
-    if(f.field_type==='timerange'){
-      const m = String(v||'').match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
-      return `<div class="field">${lab}<div class="timerange">
-        <input type="time" id="${id}_s" value="${m?m[1]+':'+m[2]:''}">
-        <span class="tr-sep">→</span>
-        <input type="time" id="${id}_e" value="${m?m[3]+':'+m[4]:''}"></div></div>`;
-    }
-    return `<div class="field">${lab}<input type="text" id="${id}" value="${esc(v??'')}"></div>`;
-  }).join('');
-
-  modal(`${r.client_name||'기록'} 고치기`, `
-    <div class="hint" style="margin-bottom:12px">작성일 ${fmtDate(r.created_at)}
-      · 작성자 ${esc(r.author_name||'')}</div>
-    <div class="grid">${body}</div>
-    <div class="msg info" style="margin-top:14px">
-      고친 항목만 변경 이력에 남습니다. 원래 값과 바뀐 값이 함께 기록됩니다.</div>`,
-    async ()=>{
-      const data = Object.assign({}, r.data||{});
-      for(const f of fields){
-        const id='e_f_'+f.field_key;
-        let v;
-        if(f.field_type==='multiselect'){
-          v = [...document.querySelectorAll(`input[name="${id}"]:checked`)].map(x=>x.value);
-          if(!v.length) v = null;
-        }else if(f.field_type==='timerange'){
-          const a=$(id+'_s')?.value, b=$(id+'_e')?.value;
-          v = (a&&b) ? a.replace(':','')+'-'+b.replace(':','') : null;
-        }else if(f.field_type==='number'){
-          const el=$(id); v = (!el||el.value==='') ? null : Number(el.value);
-        }else{
-          const el=$(id); v = el ? (el.value.trim() || null) : null;
-        }
-        if(v===null) delete data[f.field_key]; else data[f.field_key]=v;
-      }
-      const { error } = await sb.from('form_records').update({
-        data, updated_at: new Date().toISOString()
-      }).eq('id', r.id);
-      if(error){ toast('고치지 못했습니다: '+error.message,'bad'); return false; }
-      toast('고쳤습니다. 변경 이력에 남았습니다');
-      adminGrid(); return true;
-    });
-}
-
-/* ═══════════════════════════════════════════════════
-   수정 로그 — 최종관리자만
-   ═══════════════════════════════════════════════════ */
-const AUDIT_TABLE_LABEL = {
-  clients:'내담자 명부', form_records:'상담·업무 기록', users:'사용자',
-  forms:'폼 정의', form_fields:'폼 항목',
-};
-const AUDIT_ACTION_LABEL = { insert:'새로 만듦', update:'수정', delete:'지움' };
-
-async function adminAudit(){
-  if(S.me.role !== 'super_admin'){
-    $('adminBody').innerHTML = '<div class="panel"><div class="msg bad">'
-      + '변경 이력은 최종관리자만 볼 수 있습니다.</div></div>';
-    return;
-  }
-  $('adminBody').innerHTML = '<div class="panel"><div class="empty">불러오는 중…</div></div>';
-
-  // 항목 이름 사전 (data.station → 소속 소방서)
-  if(!S._fieldLabels){
-    const { data: ff } = await sb.from('form_fields').select('field_key,label');
-    const map = {};
-    (ff||[]).forEach(f=>{ map['data.'+f.field_key] = f.label; });
-    Object.assign(map, {
-      name:'이름', birth_date:'생년월일', gender:'성별', internal_id:'개인식별아이디',
-      employee_no:'사번', status:'재직상태', extra:'명부 추가정보', region_id:'지역',
-      client_name:'내담자', author_name:'작성자', role:'권한', email:'이메일',
-      username:'아이디', title:'이름', label:'항목 이름', options:'선택지',
-      required:'필수 여부', is_active:'사용 여부', sort_order:'순서',
-    });
-    S._fieldLabels = map;
-  }
-
-  let q = sb.from('audit_logs').select('*').order('created_at',{ascending:false}).limit(300);
-  if(S._auditActor) q = q.eq('actor_id', S._auditActor);
-  if(S._auditTable) q = q.eq('table_name', S._auditTable);
-  if(S._auditFrom)  q = q.gte('created_at', S._auditFrom);
-  if(S._auditTo)    q = q.lte('created_at', S._auditTo + 'T23:59:59');
-  const { data: logs, error } = await q;
-  if(error){
-    $('adminBody').innerHTML = `<div class="panel"><div class="msg bad">
-      불러오지 못했습니다: ${esc(error.message)}
-      <div class="hint" style="margin-top:6px">patch7.sql을 실행했는지 확인해 주세요.</div></div></div>`;
-    return;
-  }
-  const { data: users } = await sb.from('users').select('id,name,role').order('name');
-
-  const byActor = {};
-  (logs||[]).forEach(l=>{
-    const k = l.actor_name || '시스템';
-    byActor[k] = (byActor[k]||0)+1;
-  });
-
-  let html = `<div class="panel">
-    <h2>수정 로그</h2>
-    <div class="desc">누가 언제 무엇을 바꿨는지 자동으로 쌓입니다.
-      이 기록은 아무도 고치거나 지울 수 없습니다.</div>
-    <div class="grid">
-      <div class="field"><label>누가</label>
-        <select id="a_actor" onchange="S._auditActor=this.value;adminAudit()">
-          <option value="">전체</option>
-          ${(users||[]).map(u=>`<option value="${u.id}"
-            ${u.id===S._auditActor?'selected':''}>${esc(u.name)}</option>`).join('')}
-        </select></div>
-      <div class="field"><label>무엇을</label>
-        <select id="a_table" onchange="S._auditTable=this.value;adminAudit()">
-          <option value="">전체</option>
-          ${Object.entries(AUDIT_TABLE_LABEL).map(([k,v])=>`<option value="${k}"
-            ${k===S._auditTable?'selected':''}>${esc(v)}</option>`).join('')}
-        </select></div>
-      <div class="field"><label>시작일</label>
-        <input type="date" id="a_from" value="${esc(S._auditFrom||'')}"
-          onchange="S._auditFrom=this.value;adminAudit()"></div>
-      <div class="field"><label>종료일</label>
-        <input type="date" id="a_to" value="${esc(S._auditTo||'')}"
-          onchange="S._auditTo=this.value;adminAudit()"></div>
-    </div>
-    <div class="actions">
-      <button class="btn ghost" onclick="S._auditActor='';S._auditTable='';S._auditFrom='';S._auditTo='';adminAudit()">
-        조건 지우기</button>
-    </div>
-  </div>`;
-
-  if(Object.keys(byActor).length){
-    html += `<div class="panel"><h2>사람별 건수</h2>`
-      + barList(Object.entries(byActor).sort((a,b)=>b[1]-a[1])) + `</div>`;
-  }
-
-  html += `<div class="panel"><h2>변경 내역 ${logs?.length||0}건</h2>`;
-  if(!logs?.length){
-    html += `<div class="empty">조건에 맞는 변경 기록이 없습니다.</div></div>`;
-    $('adminBody').innerHTML = html; return;
-  }
-
-  // 날짜별로 묶어 보여 줍니다
-  const byDay = {};
-  logs.forEach(l=>{ (byDay[fmtDate(l.created_at)] = byDay[fmtDate(l.created_at)] || []).push(l); });
-
-  for(const [day, items] of Object.entries(byDay)){
-    html += `<div class="audit-day">${esc(day)} · ${items.length}건</div><div class="tl">`;
-    items.forEach(l=>{
-      const roleLab = { super_admin:'최종관리자', manager:'중간관리자',
-                        counselor:'상담사', system:'시스템' }[l.actor_role] || l.actor_role;
-      const t = new Date(l.created_at);
-      const hhmm = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
-      const chips = (l.changes||[]).slice(0,6).map(ch=>{
-        const label = S._fieldLabels[ch.field] || ch.field.replace(/^data\./,'');
-        return `<div class="chg">
-          <span class="chg-f">${esc(label)}</span>
-          <span class="chg-b">${esc(shorten(ch.before))}</span>
-          <span class="chg-arrow">→</span>
-          <span class="chg-a">${esc(shorten(ch.after))}</span></div>`;
-      }).join('');
-      const more = (l.changes||[]).length > 6
-        ? `<div class="hint">외 ${l.changes.length-6}개 항목</div>` : '';
-      html += `<div class="tl-item" style="cursor:default">
-        <div class="tl-date">${hhmm} · <b>${esc(l.actor_name||'시스템')}</b>
-          (${esc(roleLab)}) · ${esc(AUDIT_TABLE_LABEL[l.table_name]||l.table_name)}</div>
-        <div class="tl-title">${esc(AUDIT_ACTION_LABEL[l.action]||l.action)} — ${esc(l.summary||'')}</div>
-        ${chips}${more}</div>`;
+    visible.forEach(u=>{
+      const rs = maps.filter(m=>m.user_id===u.id).map(m=>rname[m.region_id]).filter(Boolean);
+      const editable = canTouch(u);
+      html += `<div class="rec" style="cursor:default">
+        <div class="rec-head">
+          <span class="rec-name">${esc(u.name)}</span>
+          <span class="rec-sub">${esc(u.username)}</span>
+          <span class="chip">${esc(roleLabel[u.role]||u.role)}</span>
+          ${u.is_active===false?'<span class="chip risk">사용 중지</span>':''}
+          <span style="flex:1"></span>
+          ${editable?`
+            <button class="btn ghost" onclick="editUser('${u.id}')">수정</button>
+            <button class="btn ghost" onclick="resetPassword('${u.id}')">비밀번호</button>
+            ${u.id!==S.me.id?`<button class="btn ghost" onclick="toggleUser('${u.id}',${u.is_active===false})">
+              ${u.is_active===false?'다시 쓰기':'사용 중지'}</button>`:''}
+          `:'<span class="hint">최종관리자가 관리합니다</span>'}
+        </div>
+        <div class="rec-grid">
+          <div><span>담당 지역</span>${u.role==='super_admin' ? '전체'
+            : (rs.join(', ') || '<span style="color:var(--warn)">없음</span>')}</div>
+          <div><span>알림 메일</span>${esc(u.email||'—')}</div>
+          <div><span>알림 받기</span>${u.notify_email===false?'끔':'켬'}</div>
+        </div>
+      </div>`;
     });
     html += `</div>`;
   }
-  html += `</div>`;
+
+  html += `<div class="actions">
+    <button class="btn" onclick="editUser(null)">계정 만들기</button></div></div>`;
   $('adminBody').innerHTML = html;
 }
-function shorten(v){
-  if(v===null || v===undefined || v==='') return '(비어 있음)';
-  const s = String(v);
-  return s.length > 40 ? s.slice(0,40)+'…' : s;
+
+// 계정 만들기·고치기
+function editUser(id){
+  const u = id ? S._ausers.find(x=>x.id===id) : null;
+  const isNew = !u;
+  const mineIds = new Set(S.regions.map(r=>r.id));
+  const picked = new Set(S._amaps.filter(m=>m.user_id===id).map(m=>m.region_id));
+
+  // 중간관리자는 상담사만, 그리고 자기 지역만 고를 수 있습니다
+  const roles = isSuper()
+    ? [['counselor','상담사'],['manager','중간관리자'],['super_admin','최종관리자']]
+    : [['counselor','상담사']];
+
+  const tops = S._aregions.filter(r=>!r.parent_id);
+  let regHtml='';
+  for(const t of tops){
+    const okTop = isSuper() || mineIds.has(t.id);
+    regHtml += `<label style="display:block;font-weight:600;margin-top:6px;${okTop?'':'opacity:.4'}">
+      <input type="checkbox" name="ur" value="${t.id}"
+        ${picked.has(t.id)?'checked':''} ${okTop?'':'disabled'}> ${esc(t.name)}</label>`;
+    for(const c of S._aregions.filter(r=>r.parent_id===t.id)){
+      const okKid = isSuper() || mineIds.has(c.id);
+      regHtml += `<label style="display:block;margin-left:18px;font-weight:400;${okKid?'':'opacity:.4'}">
+        <input type="checkbox" name="ur" value="${c.id}"
+          ${picked.has(c.id)?'checked':''} ${okKid?'':'disabled'}> ${esc(c.name)}</label>`;
+    }
+  }
+
+  modal(isNew?'계정 만들기':'계정 수정', `
+    <div class="grid">
+      <div class="field"><label>이름<span class="req">*</span></label>
+        <input type="text" id="m_uname" value="${esc(u?.name||'')}" placeholder="예: 김상담"></div>
+      <div class="field"><label>아이디<span class="req">*</span></label>
+        <input type="text" id="m_ulogin" value="${esc(u?.username||'')}"
+          ${isNew?'':'disabled'} autocapitalize="off" spellcheck="false"
+          placeholder="예: gnkim">
+        <div class="hint">${isNew
+          ? '영문 소문자로 시작하고, 소문자와 숫자만 3~30자. 로그인할 때 씁니다.'
+          : '아이디는 나중에 바꿀 수 없습니다.'}</div></div>
+      ${isNew?`<div class="field"><label>비밀번호<span class="req">*</span></label>
+        <input type="text" id="m_upw" placeholder="6자 이상">
+        <div class="hint">본인에게 알려 준 뒤 바꾸도록 안내해 주세요.</div></div>`:''}
+      <div class="field"><label>권한</label>
+        <select id="m_urole" onchange="document.getElementById('regPick').style.display=this.value==='super_admin'?'none':''">
+          ${roles.map(([v,l])=>`<option value="${v}" ${u?.role===v?'selected':''}>${l}</option>`).join('')}
+        </select>
+        ${isSuper()?'':'<div class="hint">중간관리자는 상담사 계정만 만들 수 있습니다.</div>'}</div>
+      <div class="field"><label>알림 받을 메일</label>
+        <input type="email" id="m_uemail" value="${esc(u?.email||'')}"
+          placeholder="실제로 받는 주소 (선택)">
+        <div class="hint">고위험군이 나오면 이 주소로 알려 줍니다. 비워 두셔도 됩니다.</div></div>
+      <div class="field"><label>알림 받기</label>
+        <select id="m_unotify">
+          <option value="true" ${!u||u.notify_email!==false?'selected':''}>받기</option>
+          <option value="false" ${u&&u.notify_email===false?'selected':''}>받지 않기</option></select></div>
+      <div class="field wide" id="regPick" style="${u?.role==='super_admin'?'display:none':''}">
+        <label>담당 지역<span class="req">*</span></label>
+        <div class="checks" style="display:block">${regHtml||'<span class="hint">지역을 먼저 만드세요</span>'}</div>
+        <div class="hint">상위지역을 고르면 그 아래 소방서도 함께 볼 수 있습니다.
+          ${isSuper()?'':'담당하지 않는 지역은 고를 수 없습니다.'}</div></div>
+    </div>`,
+    async ()=>{
+      const name=$('m_uname').value.trim();
+      if(!name){ toast('이름을 입력하세요','bad'); focusMissing($('m_uname')); return false; }
+      const role=$('m_urole').value;
+      const picked=[...document.querySelectorAll('input[name="ur"]:checked')].map(x=>x.value);
+      if(role!=='super_admin' && !picked.length){
+        toast('담당 지역을 한 곳 이상 고르세요','bad'); return false;
+      }
+      const body = {
+        name, role,
+        region_ids: picked,
+        email: $('m_uemail').value.trim() || null,
+        notify_email: $('m_unotify').value==='true',
+      };
+
+      try{
+        if(isNew){
+          const username=$('m_ulogin').value.trim().toLowerCase();
+          if(!/^[a-z][a-z0-9]{2,29}$/.test(username)){
+            toast('아이디는 영문 소문자로 시작하고 소문자·숫자만 3~30자로 지어 주세요','bad');
+            focusMissing($('m_ulogin')); return false;
+          }
+          const pw=$('m_upw').value;
+          if(pw.length<6){ toast('비밀번호는 6자 이상으로 정해 주세요','bad');
+            focusMissing($('m_upw')); return false; }
+          body.username=username; body.password=pw;
+
+          await apiCall('/api/users', {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify(body),
+          });
+          toast(`${name} 님의 계정을 만들었습니다`);
+          showNewAccount(name, username, $('m_upw').value);
+        }else{
+          await apiCall('/api/users/'+u.id, {
+            method:'PATCH',
+            headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify(body),
+          });
+          toast('고쳤습니다');
+        }
+        adminUsers();
+        return true;
+      }catch(e){
+        toast(e.message,'bad');
+        return false;
+      }
+    });
+}
+
+// 만든 계정을 한 번 더 보여 줍니다. 그대로 옮겨 적어 전달하시면 됩니다.
+function showNewAccount(name, username, password){
+  setTimeout(()=>{
+    modal('계정을 만들었습니다', `
+      <div class="msg info">아래 내용을 본인에게 알려 주세요.
+        비밀번호는 지금만 보이고 다시 볼 수 없습니다.</div>
+      <div class="dl" style="margin-top:14px">
+        <dt>이름</dt><dd>${esc(name)}</dd>
+        <dt>주소</dt><dd>${esc(location.origin + location.pathname)}</dd>
+        <dt>아이디</dt><dd><b style="font-size:16px">${esc(username)}</b></dd>
+        <dt>비밀번호</dt><dd><b style="font-size:16px">${esc(password)}</b></dd>
+      </div>
+      <div class="hint" style="margin-top:10px">
+        처음 로그인한 뒤 비밀번호를 바꾸도록 안내해 주시면 좋습니다.</div>`,
+      async ()=>true);
+    // 이 창은 알림용이므로 저장 버튼을 '확인'으로 바꿉니다
+    const btn = document.querySelector('.overlay:last-child #mSave');
+    if(btn) btn.textContent = '확인';
+  }, 300);
+}
+
+// 비밀번호 다시 정하기
+function resetPassword(id){
+  const u = S._ausers.find(x=>x.id===id);
+  modal(`${u.name} 님 비밀번호 다시 정하기`, `
+    <div class="field"><label>새 비밀번호<span class="req">*</span></label>
+      <input type="text" id="m_newpw" placeholder="6자 이상">
+      <div class="hint">본인에게 알려 준 뒤 바꾸도록 안내해 주세요.</div></div>`,
+    async ()=>{
+      const pw=$('m_newpw').value;
+      if(pw.length<6){ toast('6자 이상으로 정해 주세요','bad'); return false; }
+      try{
+        await apiCall(`/api/users/${id}/password`, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        toast('비밀번호를 바꿨습니다');
+        showNewAccount(u.name, u.username, pw);
+        return true;
+      }catch(e){ toast(e.message,'bad'); return false; }
+    });
+}
+
+// 계정 잠그기 / 다시 쓰기
+async function toggleUser(id, activate){
+  const u = S._ausers.find(x=>x.id===id);
+  const msg = activate
+    ? `${u.name} 님이 다시 로그인할 수 있게 합니다. 계속할까요?`
+    : `${u.name} 님의 로그인을 막습니다.\n지금까지 남긴 기록은 그대로 보존됩니다. 계속할까요?`;
+  if(!confirm(msg)) return;
+  try{
+    await apiCall(`/api/users/${id}/disable`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ active: !!activate }),
+    });
+    toast(activate?'다시 쓸 수 있습니다':'로그인을 막았습니다');
+    adminUsers();
+  }catch(e){ toast(e.message,'bad'); }
 }
 
 /* ── 공용 모달 ── */
@@ -3342,10 +2563,10 @@ async function renderHome(){
     html += qbtn('데이터 관리','기록과 명부 훑어보기',"openTab('admin:grid')");
     html += qbtn('내담자 DB','명부 양식과 인사이동',"openTab('admin:sync')");
     html += qbtn('상세소속','소방서별 부서 목록',"openTab('admin:master')");
+    html += qbtn('사용자','계정과 비밀번호',"openTab('admin:users')");
     if(isSuper()){
       html += qbtn('폼과 항목','입력 화면 편집',"openTab('admin:forms')");
       html += qbtn('지역','상위·하위지역 관리',"openTab('admin:regions')");
-      html += qbtn('사용자','계정과 권한',"openTab('admin:users')");
       html += qbtn('수정 로그','누가 무엇을 바꿨는지',"openTab('admin:audit')");
     }
     html += `</div>`;
