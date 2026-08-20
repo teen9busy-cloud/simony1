@@ -1676,11 +1676,12 @@ async function adminForms(){
   let html = `<div class="panel">
     <h2>폼</h2>
     <div class="desc">폼은 하나의 입력 화면입니다. 여기서 만들면 곧바로 탭이 생깁니다.</div>
-    <table><thead><tr><th>이름</th><th>내담자 연결</th><th>사용</th><th>순서</th><th></th></tr></thead><tbody>`;
+    <table><thead><tr><th>이름</th><th>내담자 연결</th><th>동시입력</th><th>사용</th><th>순서</th><th></th></tr></thead><tbody>`;
   for(const f of forms){
     html += `<tr style="${f.id===pick?'background:var(--accent-soft)':''}" onclick="pickForm('${f.id}')">
       <td><b>${esc(f.title)}</b><div class="hint">${esc(f.description||'')}</div></td>
       <td>${f.links_client?'연결함':'—'}</td>
+      <td>${f.allow_group?'여러 명':'—'}</td>
       <td>${f.is_active?'사용 중':'중지'}</td>
       <td>${f.sort_order}</td>
       <td style="text-align:right"><button class="btn ghost" onclick="event.stopPropagation();editForm('${f.id}')">수정</button></td>
@@ -1709,6 +1710,13 @@ function editForm(id){
           <option value="false" ${f&&!f.links_client?'selected':''}>연결 안 함</option>
         </select>
         <div class="hint">상담 기록이면 연결함, 업무보고면 연결 안 함</div></div>
+      <div class="field"><label>여러 명 한꺼번에 입력</label>
+        <select id="m_group">
+          <option value="false" ${!f||!f.allow_group?'selected':''}>한 명씩 (기본)</option>
+          <option value="true" ${f&&f.allow_group?'selected':''}>여러 명 동시 입력 (집단상담처럼)</option>
+        </select>
+        <div class="hint">같은 사건으로 여러 명을 한 번에 상담했을 때, 내용을 한 번만 입력하고
+          참여자만 여러 명 고르게 합니다. '내담자 연결'이 켜져 있어야 동작합니다.</div></div>
       <div class="field"><label>순서</label>
         <input type="number" id="m_sort" value="${f?.sort_order??10}"></div>
       <div class="field"><label>사용 여부</label>
@@ -1723,6 +1731,7 @@ function editForm(id){
       const row = {
         title, description:$('m_desc').value.trim()||null,
         links_client:$('m_lc').value==='true',
+        allow_group:$('m_group').value==='true',
         sort_order:Number($('m_sort').value)||10,
         is_active:$('m_active').value==='true',
       };
