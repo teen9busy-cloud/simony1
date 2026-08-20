@@ -452,7 +452,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 publictest';
+const APP_VERSION = '2026-08-20 publictest-auto';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -462,11 +462,6 @@ const TOP_NAV_FORMS = ['스크리닝','집단상담','업무보고'];
 /* 내담자 상세 화면에 보여줄 폼과 순서 (마찬가지로 제목으로 매칭) */
 const CLIENT_FORM_ORDER = ['스크리닝','심층상담','생애주기 상담','긴급심리지원','긴급콜','대형재난 출동'];
 
-/* 공개 간이검사(#publictest)에서 응답자가 고를 상위지역 목록입니다.
-   여기 문자열만 추가·삭제하면 그 화면의 드롭다운이 바로 바뀝니다(가나다순 자동 정렬).
-   반드시 regions 표에서 parent_id가 없는(상위) 행의 name 값과 토씨 하나까지 같아야
-   매칭됩니다. 확인용 SQL: select id, name from regions where parent_id is null order by name; */
-const TOP_REGIONS = ['경남', '창원', '중구본'];
 
 /* ── 연결 설정 ── */
 function getConfig(){
@@ -4170,7 +4165,10 @@ function showTestResult(r){
    공개 간이검사 (#publictest) — 로그인 없이 소방관 본인이 직접 응답
    문항·점수기준(TEST_Q/PTSD_OPTS/PHQ_OPTS/CUT)과 questionCard()/pickAnswer()는
    위 '간이검사' 부분과 같은 것을 그대로 씁니다. 다른 점은:
-   · 지역은 전체 지역 트리 대신 TOP_REGIONS(상위지역)만 고릅니다.
+   · 지역은 전체 지역 트리 대신 상위지역(regions 표에서 parent_id가 없는 행)만
+     고릅니다. 코드에 목록을 적어두지 않고 매번 DB에서 직접 읽어오므로, 나중에
+     관리 화면에서 새 상위지역(예: 다른 소방본부)을 추가하면 이 화면에도 코드를
+     따로 고치지 않고 자동으로 나타납니다.
    · 명부 대조는 clients 표를 직접 조회하지 않고, match_client_for_simple_test
      RPC(정확히 한 명일 때만 id를 돌려줌)로만 합니다 — 로그인 없는 사람에게
      명부 자체를 열어주지 않기 위해서입니다. (patch17_public_simple_test.sql 필요)
@@ -4180,19 +4178,18 @@ async function renderPublicTest(){
   const box = $('ptContent');
   box.innerHTML = `<div class="panel"><div class="empty">불러오는 중…</div></div>`;
 
-  const { data, error } = await sb.from('regions').select('id,name').in('name', TOP_REGIONS);
+  const { data, error } = await sb.from('regions').select('id,name').is('parent_id', null);
   if(error){
     box.innerHTML = `<div class="panel"><div class="msg bad">지역 목록을 불러오지 못했습니다: ${esc(error.message)}</div></div>`;
     return;
   }
   PT_REGION_MAP = {};
   (data||[]).forEach(r=>PT_REGION_MAP[r.name]=r.id);
-  const missing = TOP_REGIONS.filter(name=>!PT_REGION_MAP[name]);
-  if(missing.length) console.warn('[공개 간이검사] Supabase에서 못 찾은 지역 이름:', missing);
+  if(!data || !data.length) console.warn('[공개 간이검사] parent_id가 없는 상위지역이 하나도 없습니다.');
 
-  const sorted = TOP_REGIONS.slice().sort((a,b)=>a.localeCompare(b,'ko'));
+  const sorted = Object.keys(PT_REGION_MAP).sort((a,b)=>a.localeCompare(b,'ko'));
   const regionOpts = sorted.map(name=>
-    `<option value="${esc(name)}" ${!PT_REGION_MAP[name]?'disabled':''}>${esc(name)}${!PT_REGION_MAP[name]?' (확인 필요)':''}</option>`
+    `<option value="${esc(name)}">${esc(name)}</option>`
   ).join('');
 
   S._answers = {};
