@@ -452,7 +452,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 clienttest';
+const APP_VERSION = '2026-08-20 teamcol';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -2026,7 +2026,7 @@ function downloadCSV(filename, headers, rows){
    이름을 누르면 그 사람의 상세 화면(상담 이력 포함)으로 갑니다. */
 const GRID_COLUMNS = [
   ['name','이름'], ['birth_date','생년월일'], ['gender','성별'], ['region','지역'],
-  ['department','소속'], ['rank','계급'], ['status','상태'],
+  ['department','소속'], ['team','세부소속'], ['rank','계급'], ['status','상태'],
   ['personal_id','개인식별아이디'], ['digital_id','디지털 식별번호'], ['employee_no','사번'],
 ];
 async function adminGrid(){
@@ -2097,7 +2097,8 @@ function gridRowValues(c){
   const rname = {}; S.allRegions.forEach(r=>rname[r.id]=r.name);
   return {
     name:c.name, birth_date:c.birth_date||'', gender:c.gender||'',
-    region:rname[c.region_id]||'', department:c.extra?.department||'', rank:c.extra?.rank||'',
+    region:rname[c.region_id]||'', department:c.extra?.department||'', team:c.extra?.team||'',
+    rank:c.extra?.rank||'',
     status:c.status||'재직', personal_id:c.personal_id||c.internal_id||'',
     digital_id:c.digital_id||'', employee_no:c.employee_no||'',
   };
@@ -3841,6 +3842,7 @@ async function showClient(id){
     </div>
     <div class="chips">
       <span class="chip">${esc(rname[p.region_id]||'지역 없음')}</span>
+      ${p.extra?.team ? `<span class="chip">${esc(p.extra.team)}</span>` : ''}
       <span class="chip${['전출','퇴직'].includes(p.status)?' risk':''}">${esc(p.status||'재직')}</span>
       ${(defs||[]).map(d=>p.extra?.[d.field_key]
         ? `<span class="chip">${esc(d.label)} ${esc(p.extra[d.field_key])}</span>`:'').join('')}
