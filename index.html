@@ -399,6 +399,15 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   </div>
 </div>
 
+<!-- ══════ 공개 간이검사 (로그인 없이 여는 화면. 주소 끝에 #publictest) ══════ -->
+<div id="publicTestView" class="hidden">
+  <header>
+    <h1>시모니 1.0</h1>
+    <span class="who">마음건강 간이검사</span>
+  </header>
+  <div class="wrap" id="ptContent"></div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════
    ◆ 여기 세 줄만 채우면 됩니다 ◆
@@ -443,7 +452,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 grid500fix';
+const APP_VERSION = '2026-08-20 publictest';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -452,6 +461,12 @@ const TOP_NAV_FORMS = ['스크리닝','집단상담','업무보고'];
 
 /* 내담자 상세 화면에 보여줄 폼과 순서 (마찬가지로 제목으로 매칭) */
 const CLIENT_FORM_ORDER = ['스크리닝','심층상담','생애주기 상담','긴급심리지원','긴급콜','대형재난 출동'];
+
+/* 공개 간이검사(#publictest)에서 응답자가 고를 상위지역 목록입니다.
+   여기 문자열만 추가·삭제하면 그 화면의 드롭다운이 바로 바뀝니다(가나다순 자동 정렬).
+   반드시 regions 표에서 parent_id가 없는(상위) 행의 name 값과 토씨 하나까지 같아야
+   매칭됩니다. 확인용 SQL: select id, name from regions where parent_id is null order by name; */
+const TOP_REGIONS = ['경남', '창원', '중구본'];
 
 /* ── 연결 설정 ── */
 function getConfig(){
@@ -477,7 +492,7 @@ function resetConfig(){
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function show(v){ ['setupView','loginView','appView'].forEach(x=>$(x).classList.toggle('hidden',x!==v)); }
+function show(v){ ['setupView','loginView','appView','publicTestView'].forEach(x=>$(x).classList.toggle('hidden',x!==v)); }
 function toast(msg,kind){
   const t=document.createElement('div');
   t.className='toast'+(kind==='bad'?' bad':''); t.textContent=msg;
@@ -557,8 +572,16 @@ async function apiCall(path, opts){
   return res;
 }
 
-/* ── 시작 ── */
+/* ── 시작 ──
+   주소 끝이 #publictest 이면, 로그인 화면·설정 확인을 전부 건너뛰고
+   바로 로그인 없이 여는 간이검사 화면을 띄웁니다. 큐알·링크는 이 주소로 만듭니다:
+   https://teen9busy-cloud.github.io/simony1/#publictest */
 (async function init(){
+  if(location.hash.slice(1).startsWith('publictest')){
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    show('publicTestView');
+    return renderPublicTest();
+  }
   const cfg = getConfig();
   if(!cfg.url || !cfg.key){ show('setupView'); return; }
   sb = supabase.createClient(cfg.url, cfg.key);
@@ -4139,6 +4162,166 @@ function showTestResult(r){
     <div class="actions">
       <button class="btn" onclick="openTab('home')">대시보드로</button>
       <button class="btn ghost" onclick="openSimpleTest()">다른 사람 검사하기</button>
+    </div></div>`;
+  window.scrollTo(0,0);
+}
+
+/* ═══════════════════════════════════════════════════
+   공개 간이검사 (#publictest) — 로그인 없이 소방관 본인이 직접 응답
+   문항·점수기준(TEST_Q/PTSD_OPTS/PHQ_OPTS/CUT)과 questionCard()/pickAnswer()는
+   위 '간이검사' 부분과 같은 것을 그대로 씁니다. 다른 점은:
+   · 지역은 전체 지역 트리 대신 TOP_REGIONS(상위지역)만 고릅니다.
+   · 명부 대조는 clients 표를 직접 조회하지 않고, match_client_for_simple_test
+     RPC(정확히 한 명일 때만 id를 돌려줌)로만 합니다 — 로그인 없는 사람에게
+     명부 자체를 열어주지 않기 위해서입니다. (patch17_public_simple_test.sql 필요)
+   ═══════════════════════════════════════════════════ */
+let PT_REGION_MAP = {};   // 상위지역 이름 → id
+async function renderPublicTest(){
+  const box = $('ptContent');
+  box.innerHTML = `<div class="panel"><div class="empty">불러오는 중…</div></div>`;
+
+  const { data, error } = await sb.from('regions').select('id,name').in('name', TOP_REGIONS);
+  if(error){
+    box.innerHTML = `<div class="panel"><div class="msg bad">지역 목록을 불러오지 못했습니다: ${esc(error.message)}</div></div>`;
+    return;
+  }
+  PT_REGION_MAP = {};
+  (data||[]).forEach(r=>PT_REGION_MAP[r.name]=r.id);
+  const missing = TOP_REGIONS.filter(name=>!PT_REGION_MAP[name]);
+  if(missing.length) console.warn('[공개 간이검사] Supabase에서 못 찾은 지역 이름:', missing);
+
+  const sorted = TOP_REGIONS.slice().sort((a,b)=>a.localeCompare(b,'ko'));
+  const regionOpts = sorted.map(name=>
+    `<option value="${esc(name)}" ${!PT_REGION_MAP[name]?'disabled':''}>${esc(name)}${!PT_REGION_MAP[name]?' (확인 필요)':''}</option>`
+  ).join('');
+
+  S._answers = {};
+  let html = `<div class="panel">
+    <h2>7문항으로 이루어진 짧은 검사입니다</h2>
+    <div class="desc">정답이 없으니 최근 상태에 가장 가까운 것을 고르시면 됩니다.
+      결과는 담당 상담센터에만 전달되며, 다른 사람에게 공개되지 않습니다.</div>
+    <div class="section-title">응답자 정보</div>
+    <div class="grid">
+      <div class="field"><label>소속 상위지역<span class="req">*</span></label>
+        <select id="pt_region"><option value="">— 선택 —</option>${regionOpts}</select></div>
+      <div class="field"><label>이름<span class="req">*</span></label>
+        <input type="text" id="pt_name" placeholder="예: 홍길동"></div>
+      <div class="field"><label>생년월일 (숫자 8자리)<span class="req">*</span></label>
+        <input type="text" id="pt_birth" inputmode="numeric" maxlength="10"
+          placeholder="예: 19900101" oninput="maskBirth(this)"></div>
+      <div class="field"><label>세부 소속 (선택)</label>
+        <input type="text" id="pt_dept" placeholder="예: 진주소방서 구조대"></div>
+    </div>
+    <div class="hint">세부 소속은 같은 이름·생년월일이 겹칠 때 담당자가 확인하는 용도로만 씁니다.</div>
+  </div>`;
+
+  html += `<div class="panel"><div class="section-title">최근 한 달간 겪은 사건에 대하여</div>`;
+  TEST_Q.filter(q=>q.group==='ptsd').forEach((q,i)=> html += questionCard(q, i+1, PTSD_OPTS));
+  html += `</div>`;
+
+  html += `<div class="panel"><div class="section-title">지난 2주간, 얼마나 자주 다음과 같은 문제로 곤란을 겪으셨습니까?</div>`;
+  TEST_Q.filter(q=>q.group==='phq').forEach((q,i)=> html += questionCard(q, i+5, PHQ_OPTS));
+  html += `</div>`;
+
+  html += `<div class="panel">
+    <div class="actions">
+      <button class="btn" id="ptSave" onclick="submitPublicTest()">검사 제출</button>
+    </div>
+    <div class="hint" style="text-align:center;margin-top:6px">제출 후에는 내용을 고칠 수 없습니다.</div>
+  </div>`;
+  box.innerHTML = html;
+}
+async function submitPublicTest(){
+  const btn = $('ptSave');
+  document.querySelectorAll('#ptContent .field').forEach(f=>f.classList.remove('err'));
+
+  const regionName = $('pt_region').value;
+  const name = $('pt_name').value.trim();
+  const birth = normalizeBirth($('pt_birth').value);
+  const dept = $('pt_dept').value.trim();
+
+  if(!regionName || !PT_REGION_MAP[regionName]){
+    $('pt_region').closest('.field').classList.add('err');
+    toast('소속 상위지역을 골라 주세요','bad'); return;
+  }
+  if(!name){
+    $('pt_name').closest('.field').classList.add('err');
+    toast('이름을 입력하세요','bad'); return;
+  }
+  if(!birth){
+    $('pt_birth').closest('.field').classList.add('err');
+    toast('생년월일을 숫자 8자리로 정확히 입력하세요','bad'); return;
+  }
+  const missing = TEST_Q.filter(q=>S._answers[q.key]===undefined);
+  document.querySelectorAll('#ptContent .qcard').forEach(c=>c.classList.remove('miss'));
+  if(missing.length){
+    missing.forEach(q=>$('card_'+q.key).classList.add('miss'));
+    toast(`응답하지 않은 문항이 ${missing.length}개 있습니다`,'bad');
+    $('card_'+missing[0].key).scrollIntoView({block:'center'});
+    return;
+  }
+
+  const a = S._answers;
+  const ptsd = a.q1+a.q2+a.q3+a.q4;
+  const dep  = a.q5+a.q6;
+  const suicide = a.q7;
+  const regionId = PT_REGION_MAP[regionName];
+
+  btn.disabled = true; btn.textContent = '저장 중…';
+
+  let matched = null;
+  try{
+    const { data: mid, error: mErr } = await sb.rpc('match_client_for_simple_test', {
+      p_region_id: regionId, p_name: name, p_birth: birth,
+    });
+    if(!mErr) matched = mid || null;
+  }catch(e){ /* 매칭에 실패해도 검사 결과 저장은 계속 진행합니다 */ }
+
+  const payload = {
+    region_id: regionId, client_name: name, birth_date: birth,
+    client_id: matched, match_status: matched ? 'matched' : 'pending',
+    tested_at: new Date().toISOString(),
+    ptsd_score: ptsd, dep_score: dep, suicide_risk: suicide,
+    answers: Object.assign({ q1:a.q1,q2:a.q2,q3:a.q3,q4:a.q4,q5:a.q5,q6:a.q6,q7:a.q7 },
+      dept ? { department: dept } : {}),
+  };
+  const { error } = await sb.from('simple_tests').insert(payload);
+  btn.disabled = false; btn.textContent = '검사 제출';
+  if(error){ toast('저장하지 못했습니다: '+error.message, 'bad'); return; }
+  showPublicTestResult({ name, ptsd, dep, suicide, matched: !!matched });
+}
+function showPublicTestResult(r){
+  const hi = r.ptsd>=CUT.ptsd || r.dep>=CUT.dep || r.suicide>=CUT.suicide;
+  const row = (label, score, cut, max) => {
+    const over = score>=cut;
+    return `<div class="score-row">
+      <div class="score-label">${esc(label)}</div>
+      <div class="bar-track"><div class="bar-fill${over?' over':''}"
+        style="width:${Math.round(score/max*100)}%"></div></div>
+      <div class="score-num${over?' over':''}">${score}점</div>
+      <div class="score-cut">기준 ${cut}점</div></div>`;
+  };
+  $('ptContent').innerHTML = `<div class="panel">
+    <h2>검사가 끝났습니다</h2>
+    <div class="desc">${esc(r.name)} 님, 응답해 주셔서 고맙습니다.
+      아래 점수는 진단이 아니라 지금 상태를 살펴보기 위한 참고 자료입니다.</div>
+    <div class="scores">
+      ${row('PTSD', r.ptsd, CUT.ptsd, 16)}
+      ${row('우울', r.dep, CUT.dep, 6)}
+      ${row('자살위험', r.suicide, CUT.suicide, 3)}
+    </div>
+    ${hi ? `<div class="msg bad" style="margin-top:18px;font-size:17px">
+        <b>상담사와 이야기를 나눠보시길 권합니다.</b><br>
+        기준을 넘은 항목이 있습니다. 힘든 시기를 혼자 견디지 않으셔도 됩니다.
+        찾아가는 상담실 상담사가 곧 연락드릴 예정이며, 그전에라도 도움이 필요하시면
+        자살예방 상담전화 <b>109</b>번으로 24시간 연락하실 수 있습니다.</div>`
+      : `<div class="msg info" style="margin-top:18px;font-size:17px">
+        기준을 넘은 항목은 없습니다. 다만 점수와 무관하게 마음이 힘드실 때는
+        언제든 상담을 신청하실 수 있습니다.</div>`}
+    ${r.matched ? '' : `<div class="hint" style="margin-top:12px">
+      명부에서 본인을 바로 찾지 못해 담당자가 확인할 예정입니다. 결과는 정상 저장되었습니다.</div>`}
+    <div class="actions">
+      <button class="btn ghost" onclick="renderPublicTest()">다른 사람 검사하기</button>
     </div></div>`;
   window.scrollTo(0,0);
 }
