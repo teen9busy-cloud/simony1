@@ -443,7 +443,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 restored';
+const APP_VERSION = '2026-08-20 grid500fix';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -2044,13 +2044,14 @@ function onGridFilterChange(){
   S._gridRegion = $('gridRegion').value;
   S._gridQ = $('gridQ').value.trim();
   S._gridShowLeft = $('gridShowLeft').checked;
+  S._gridLimit = 500;   // 조건이 바뀌면 다시 처음 500명부터 봅니다
   clearTimeout(_gridDebounce);
   _gridDebounce = setTimeout(loadGridTable, 250);
 }
-async function loadGridTable(){
-  const box = $('gridTableBox');
-  if(!box) return;
-  let q = sb.from('clients').select('*').order('name').limit(500);
+// 지금 화면에 걸린 필터(지역·검색어·전출표시)를 그대로 적용한 쿼리를 만듭니다.
+// 화면 표(제한 있음)와 엑셀 내려받기(제한 없음)가 이 함수를 같이 씁니다.
+function buildGridQuery(){
+  let q = sb.from('clients').select('*').order('name');
   if(S._gridRegion) q = q.eq('region_id', S._gridRegion);
   if(!S._gridShowLeft) q = q.in('status', ['재직','휴직']);
   if(S._gridQ){
@@ -2059,10 +2060,20 @@ async function loadGridTable(){
     q = q.or(`name.ilike.*${pat}*,internal_id.ilike.*${pat}*,personal_id.ilike.*${pat}*,`
       + `digital_id.ilike.*${pat}*,employee_no.ilike.*${pat}*`);
   }
-  const { data, error } = await q;
+  return q;
+}
+async function loadGridTable(){
+  const box = $('gridTableBox');
+  if(!box) return;
+  S._gridLimit = S._gridLimit || 500;
+  const { data, error } = await buildGridQuery().limit(S._gridLimit);
   if(error){ box.innerHTML = `<div class="msg bad">불러오지 못했습니다: ${esc(error.message)}</div>`; return; }
   S._gridData = data || [];
   renderGridTable();
+}
+function loadMoreGrid(){
+  S._gridLimit = (S._gridLimit||500) + 500;
+  loadGridTable();
 }
 function gridRowValues(c){
   const rname = {}; S.allRegions.forEach(r=>rname[r.id]=r.name);
@@ -2077,8 +2088,10 @@ function renderGridTable(){
   const box = $('gridTableBox');
   if(!box) return;
   const data = S._gridData || [];
+  const limit = S._gridLimit || 500;
+  const moreLeft = data.length === limit;   // 딱 제한만큼 왔으면 더 있을 수 있다는 뜻입니다
   const cnt = $('gridCnt'); if(cnt) cnt.textContent = data.length.toLocaleString()+'명'
-    + (data.length===500?' (500명까지만 표시)':'');
+    + (moreLeft ? ` (${limit.toLocaleString()}명까지 표시 중)` : '');
   if(!data.length){ box.innerHTML = `<div class="empty">조건에 맞는 내담자가 없습니다.</div>`; return; }
   const hidden = S._gridHidden || [];
   const cols = GRID_COLUMNS.filter(([k])=>!hidden.includes(k));
@@ -2088,12 +2101,23 @@ function renderGridTable(){
       const v = gridRowValues(c);
       return `<tr onclick="openClient('${c.id}')">${cols.map(([k],i)=>
         `<td${i===0?' class="g-first"':''}>${esc(v[k])}</td>`).join('')}</tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}</tbody></table>
+    ${moreLeft ? `<div class="actions" style="border-top:0;padding-top:14px">
+      <button class="btn ghost" onclick="loadMoreGrid()">더 보기 (500명 더 불러오기)</button>
+    </div>` : ''}`;
 }
-function exportGridCSV(){
+// 화면 표는 한 번에 너무 많이 그리면 느려지므로 제한을 두지만, 엑셀 내려받기는
+// 지금 걸린 필터에 맞는 사람 전체를 새로 불러와서 담습니다(화면 제한과 무관합니다).
+async function exportGridCSV(){
+  toast('내려받을 목록을 모으는 중…');
+  const { data, error } = await buildGridQuery().limit(5000);
+  if(error){ toast('내려받지 못했습니다: '+error.message,'bad'); return; }
   const hidden = S._gridHidden || [];
   const cols = GRID_COLUMNS.filter(([k])=>!hidden.includes(k));
-  const rows = (S._gridData||[]).map(c=>{ const v = gridRowValues(c); return cols.map(([k])=>v[k]); });
+  const rows = (data||[]).map(c=>{ const v = gridRowValues(c); return cols.map(([k])=>v[k]); });
+  if(data && data.length===5000){
+    toast('내담자가 5,000명이 넘어 앞의 5,000명만 담았습니다. 지역이나 검색어로 좁혀서 다시 받아 주세요.','bad');
+  }
   downloadCSV('시모니_내담자명부.csv', cols.map(([,l])=>l), rows);
 }
 
@@ -2150,13 +2174,14 @@ function onRecordsFilterChange(){
   S._recFrom = $('recFrom').value;
   S._recTo = $('recTo').value;
   S._recQ = $('recQ').value.trim();
+  S._recLimit = 500;   // 조건이 바뀌면 다시 처음 500건부터 봅니다
   clearTimeout(_recDebounce);
   _recDebounce = setTimeout(loadRecordsTable, 250);
 }
-async function loadRecordsTable(){
-  const box = $('recTableBox');
-  if(!box) return;
-  let q = sb.from('form_records').select('*').order('created_at',{ascending:false}).limit(500);
+// 지금 화면에 걸린 필터를 그대로 적용한 쿼리를 만듭니다.
+// 화면 표(제한 있음)와 엑셀 내려받기(제한 없음)가 이 함수를 같이 씁니다.
+function buildRecordsQuery(){
+  let q = sb.from('form_records').select('*').order('created_at',{ascending:false});
   if(S._recForm) q = q.eq('form_id', S._recForm);
   if(S._recRegion) q = q.eq('region_id', S._recRegion);
   if(S._recFrom) q = q.gte('created_at', S._recFrom);
@@ -2165,10 +2190,20 @@ async function loadRecordsTable(){
     const pat = S._recQ.replace(/[*,()]/g, ' ').trim();
     q = q.or(`client_name.ilike.*${pat}*,author_name.ilike.*${pat}*`);
   }
-  const { data, error } = await q;
+  return q;
+}
+async function loadRecordsTable(){
+  const box = $('recTableBox');
+  if(!box) return;
+  S._recLimit = S._recLimit || 500;
+  const { data, error } = await buildRecordsQuery().limit(S._recLimit);
   if(error){ box.innerHTML = `<div class="msg bad">불러오지 못했습니다: ${esc(error.message)}</div>`; return; }
   S._recData = data || [];
   renderRecordsTable();
+}
+function loadMoreRecords(){
+  S._recLimit = (S._recLimit||500) + 500;
+  loadRecordsTable();
 }
 function recRowValues(r){
   const rname = {}; S.allRegions.forEach(x=>rname[x.id]=x.name);
@@ -2183,8 +2218,10 @@ function renderRecordsTable(){
   const box = $('recTableBox');
   if(!box) return;
   const data = S._recData || [];
+  const limit = S._recLimit || 500;
+  const moreLeft = data.length === limit;
   const cnt = $('recCnt'); if(cnt) cnt.textContent = data.length.toLocaleString()+'건'
-    + (data.length===500?' (500건까지만 표시)':'');
+    + (moreLeft ? ` (${limit.toLocaleString()}건까지 표시 중)` : '');
   if(!data.length){ box.innerHTML = `<div class="empty">조건에 맞는 기록이 없습니다.</div>`; return; }
   const hidden = S._recHidden || [];
   const cols = REC_COLUMNS.filter(([k])=>!hidden.includes(k));
@@ -2195,12 +2232,23 @@ function renderRecordsTable(){
       const v = recRowValues(r);
       return `<tr onclick="openRecordDetailByIndex(${i})">${cols.map(([k],j)=>
         `<td${j===0?' class="g-first"':''}>${esc(v[k])}</td>`).join('')}</tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}</tbody></table>
+    ${moreLeft ? `<div class="actions" style="border-top:0;padding-top:14px">
+      <button class="btn ghost" onclick="loadMoreRecords()">더 보기 (500건 더 불러오기)</button>
+    </div>` : ''}`;
 }
-function exportRecordsCSV(){
+// 화면 표는 제한을 두지만, 엑셀 내려받기는 지금 걸린 필터에 맞는 기록 전체를
+// 새로 불러와서 담습니다(화면 제한과 무관합니다).
+async function exportRecordsCSV(){
+  toast('내려받을 목록을 모으는 중…');
+  const { data, error } = await buildRecordsQuery().limit(5000);
+  if(error){ toast('내려받지 못했습니다: '+error.message,'bad'); return; }
   const hidden = S._recHidden || [];
   const cols = REC_COLUMNS.filter(([k])=>!hidden.includes(k));
-  const rows = (S._recData||[]).map(r=>{ const v = recRowValues(r); return cols.map(([k])=>v[k]); });
+  const rows = (data||[]).map(r=>{ const v = recRowValues(r); return cols.map(([k])=>v[k]); });
+  if(data && data.length===5000){
+    toast('기록이 5,000건이 넘어 앞의 5,000건만 담았습니다. 폼·지역·기간으로 좁혀서 다시 받아 주세요.','bad');
+  }
   downloadCSV('시모니_전체기록.csv', cols.map(([,l])=>l), rows);
 }
 // '전체 기록' 표에서 행을 누르면, 그 기록이 속한 폼의 항목 정의를 그때그때 불러와
