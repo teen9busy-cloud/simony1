@@ -14,18 +14,18 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:15px;line-height:1.6}
-button{font-family:inherit;font-size:15px;cursor:pointer}
-input,select,textarea{font-family:inherit;font-size:15px}
+  font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:17px;line-height:1.6}
+button{font-family:inherit;font-size:17px;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:17px}
 .hidden{display:none !important}
 
 /* 헤더 */
 header{background:var(--accent);color:#fff;padding:0 20px;display:flex;
-  align-items:center;gap:18px;height:60px;position:sticky;top:0;z-index:50}
-header h1{font-size:19px;margin:0;font-weight:700;letter-spacing:-.3px}
+  align-items:center;gap:18px;height:68px;position:sticky;top:0;z-index:50}
+header h1{font-size:22px;margin:0;font-weight:700;letter-spacing:-.3px}
 header .spacer{flex:1}
-header .who{font-size:13px;opacity:.9}
-header .ver{font-size:11.5px;opacity:.65;background:rgba(255,255,255,.15);
+header .who{font-size:15px;opacity:.9}
+header .ver{font-size:13px;opacity:.65;background:rgba(255,255,255,.15);
   padding:3px 8px;border-radius:12px;letter-spacing:.02em}
 header button{background:rgba(255,255,255,.15);color:#fff;border:0;
   padding:6px 12px;border-radius:var(--radius)}
@@ -35,41 +35,41 @@ header button:hover{background:rgba(255,255,255,.28)}
 
 /* 탭 */
 nav.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:18px;flex-wrap:wrap}
-nav.tabs button{background:none;border:0;padding:12px 18px;color:var(--sub);font-size:15px;
+nav.tabs button{background:none;border:0;padding:15px 20px;color:var(--sub);font-size:17px;
   border-bottom:2px solid transparent;margin-bottom:-2px;font-weight:600}
 nav.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
 
 .panel{background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius);padding:20px;margin-bottom:16px}
-.panel h2{margin:0 0 4px;font-size:18px}
-.panel .desc{color:var(--sub);font-size:13px;margin-bottom:16px}
+.panel h2{margin:0 0 4px;font-size:20.5px}
+.panel .desc{color:var(--sub);font-size:15px;margin-bottom:16px}
 
 /* 폼 */
-.section-title{font-size:13px;font-weight:700;color:var(--accent);
+.section-title{font-size:15px;font-weight:700;color:var(--accent);
   background:var(--accent-soft);padding:7px 12px;border-radius:var(--radius);
   margin:22px 0 12px}
 .section-title:first-child{margin-top:0}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
 .field.wide{grid-column:1/-1}
-.field label{display:block;font-size:14px;font-weight:700;margin-bottom:6px}
+.field label{display:block;font-size:16px;font-weight:700;margin-bottom:6px}
 .field label .req{color:var(--warn);margin-left:3px}
 .field input[type=text],.field input[type=number],.field input[type=date],
 .field input[type=time],.field select,.field textarea{
-  width:100%;padding:8px 10px;border:1px solid var(--line);
+  width:100%;padding:11px 13px;border:1px solid var(--line);
   border-radius:var(--radius);background:#fff}
-.field textarea{min-height:88px;resize:vertical}
+.field textarea{min-height:96px;resize:vertical}
 .field input:focus,.field select:focus,.field textarea:focus{
   outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
-.checks{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 10px;
+.checks{display:flex;flex-wrap:wrap;gap:8px 16px;padding:10px 12px;
   border:1px solid var(--line);border-radius:var(--radius);background:#fff;
-  max-height:170px;overflow:auto}
+  max-height:190px;overflow:auto}
 .checks label{display:flex;align-items:center;gap:5px;font-weight:400;
-  font-size:13px;margin:0;cursor:pointer}
-.hint{font-size:12px;color:var(--sub);margin-top:4px}
+  font-size:15px;margin:0;cursor:pointer}
+.hint{font-size:14px;color:var(--sub);margin-top:4px}
 .err{border-color:var(--warn) !important}
 
 /* 버튼 */
-.btn{background:var(--accent);color:#fff;border:0;padding:11px 20px;
+.btn{background:var(--accent);color:#fff;border:0;padding:14px 24px;
   border-radius:var(--radius);font-weight:700}
 .btn:hover{background:#164a19}
 .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
@@ -79,12 +79,12 @@ nav.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
   border-top:1px solid var(--line2)}
 
 /* 표 */
-table{width:100%;border-collapse:collapse;font-size:14.5px}
+table{width:100%;border-collapse:collapse;font-size:16.5px}
 .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .scroll-x table{min-width:860px}
 td.nowrap,th.nowrap{white-space:nowrap}
-th,td{padding:12px 12px;text-align:left;border-bottom:1px solid var(--line2)}
-th{background:var(--line2);font-weight:700;font-size:13px;color:var(--sub);
+th,td{padding:14px 14px;text-align:left;border-bottom:1px solid var(--line2)}
+th{background:var(--line2);font-weight:700;font-size:15px;color:var(--sub);
   position:sticky;top:0}
 tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .empty{padding:40px 20px;text-align:center;color:var(--sub)}
@@ -92,7 +92,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 /* 로그인 */
 #loginView{max-width:380px;margin:70px auto}
 #loginView .panel{padding:28px}
-#loginView h2{font-size:20px;text-align:center;margin-bottom:20px}
+#loginView h2{font-size:23px;text-align:center;margin-bottom:20px}
 #loginView .field{margin-bottom:14px}
 #loginView .btn{width:100%}
 
@@ -101,7 +101,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   background:var(--ink);color:#fff;padding:11px 20px;border-radius:var(--radius);
   z-index:200;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .toast.bad{background:var(--warn)}
-.msg{padding:10px 12px;border-radius:var(--radius);font-size:13px;margin-bottom:14px}
+.msg{padding:10px 12px;border-radius:var(--radius);font-size:15px;margin-bottom:14px}
 .msg.bad{background:#fdeceb;color:var(--warn);border:1px solid #f5c6c2}
 .msg.info{background:var(--accent-soft);color:var(--accent)}
 
@@ -112,7 +112,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .client-row .field{flex:1;min-width:130px}
 .picked{display:flex;align-items:center;gap:12px;background:var(--accent-soft);
   border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px}
-.picked b{font-size:15px}
+.picked b{font-size:17px}
 .results{margin-top:10px;border:1px solid var(--line);border-radius:var(--radius);
   background:#fff;max-height:210px;overflow:auto}
 .results div{padding:9px 12px;border-bottom:1px solid var(--line2);cursor:pointer}
@@ -124,21 +124,21 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
 .modal{background:#fff;border-radius:var(--radius);max-width:720px;width:100%;
   padding:24px}
-.modal h3{margin:0 0 16px;font-size:17px}
+.modal h3{margin:0 0 16px;font-size:19.5px}
 .dl{display:grid;grid-template-columns:170px 1fr;gap:1px;background:var(--line2);
   border:1px solid var(--line2);border-radius:var(--radius);overflow:hidden}
-.dl dt{background:#fafcfb;padding:9px 12px;font-weight:600;font-size:13px}
-.dl dd{background:#fff;padding:9px 12px;margin:0;font-size:13px;white-space:pre-wrap}
+.dl dt{background:#fafcfb;padding:9px 12px;font-weight:600;font-size:15px}
+.dl dd{background:#fff;padding:9px 12px;margin:0;font-size:15px;white-space:pre-wrap}
 
 /* 검색 바 */
 .searchbar{display:flex;gap:10px;align-items:stretch;margin-bottom:6px}
-.searchbar input{flex:1;padding:14px 16px;font-size:17px;border:2px solid var(--line);
+.searchbar input{flex:1;padding:14px 16px;font-size:19.5px;border:2px solid var(--line);
   border-radius:var(--radius);background:#fff}
 .searchbar input:focus{outline:0;border-color:var(--accent)}
-.searchbar .btn{padding:0 28px;font-size:16px}
+.searchbar .btn{padding:0 28px;font-size:18.5px}
 
 /* 퀵 버튼 */
-.eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--sub);
+.eyebrow{font-size:14px;font-weight:700;letter-spacing:.08em;color:var(--sub);
   margin:22px 0 10px}
 .quick{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
 .qbtn{display:flex;flex-direction:column;justify-content:center;gap:3px;
@@ -147,15 +147,15 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   border-radius:var(--radius);transition:background .12s,border-color .12s}
 .qbtn:hover{background:var(--accent-soft);border-left-color:var(--accent-dark)}
 .qbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.qbtn b{font-size:16.5px;font-weight:700;color:var(--ink)}
-.qbtn span{font-size:13px;color:var(--sub)}
+.qbtn b{font-size:19px;font-weight:700;color:var(--ink)}
+.qbtn span{font-size:15px;color:var(--sub)}
 .qbtn.alert{border-left-color:var(--warn)}
 .qbtn.alert b{color:var(--warn)}
 
 /* 이메일 도메인 빠른 입력 */
 .domains{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .domain-chip{background:var(--accent-soft);color:var(--accent);border:1px solid var(--line);
-  border-radius:20px;padding:6px 13px;font-size:13.5px;font-weight:600}
+  border-radius:20px;padding:6px 13px;font-size:15.5px;font-weight:600}
 .domain-chip:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 
 /* 집단상담 참여자 */
@@ -164,12 +164,12 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .member{display:flex;align-items:center;gap:9px;background:#fff;
   border:1px solid var(--line);border-left:4px solid var(--accent);
   border-radius:var(--radius);padding:10px 12px}
-.member b{font-size:15.5px}
-.member span{flex:1;font-size:12.5px;color:var(--sub)}
-.member .btn{padding:4px 10px;font-size:13px}
+.member b{font-size:18px}
+.member span{flex:1;font-size:14.5px;color:var(--sub)}
+.member .btn{padding:4px 10px;font-size:15px}
 
 /* 엑셀형 표 */
-.grid-table{font-size:13.5px}
+.grid-table{font-size:15.5px}
 .grid-table th{position:sticky;top:0;z-index:2;background:var(--line2);
   box-shadow:inset 0 -1px 0 var(--line)}
 /* 머리글은 스크롤 상자 맨 위에 붙습니다.
@@ -180,15 +180,15 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .grid-table tbody tr{cursor:pointer}
 .grid-table tbody tr:nth-child(even){background:#fbfcfb}
 .grid-table tbody tr:hover{background:var(--accent-soft)}
-.cnt{font-size:14px;font-weight:600;color:var(--accent);
+.cnt{font-size:16px;font-weight:600;color:var(--accent);
   background:var(--accent-soft);padding:3px 10px;border-radius:12px;margin-left:6px}
 
 /* 변경 이력 */
-.audit-day{font-size:13px;font-weight:700;color:var(--accent);
+.audit-day{font-size:15px;font-weight:700;color:var(--accent);
   background:var(--accent-soft);padding:7px 12px;border-radius:var(--radius);
   margin:20px 0 12px}
 .chg{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  font-size:13.5px;margin-top:5px;padding:5px 9px;background:var(--bg);
+  font-size:15.5px;margin-top:5px;padding:5px 9px;background:var(--bg);
   border-radius:var(--radius)}
 .chg-f{font-weight:700;min-width:90px}
 .chg-b{color:var(--warn);text-decoration:line-through;opacity:.75}
@@ -201,12 +201,12 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   border-radius:var(--radius);padding:13px 16px;cursor:pointer;transition:background .12s}
 .rec:hover{background:var(--accent-soft)}
 .rec-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.rec-name{font-size:16.5px;font-weight:700}
-.rec-sub{font-size:13.5px;color:var(--sub)}
+.rec-name{font-size:19px;font-weight:700}
+.rec-sub{font-size:15.5px;color:var(--sub)}
 .rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
   gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line2)}
-.rec-grid > div{font-size:14px}
-.rec-grid span{display:block;font-size:11.5px;color:var(--sub);margin-bottom:1px}
+.rec-grid > div{font-size:16px}
+.rec-grid span{display:block;font-size:13px;color:var(--sub);margin-bottom:1px}
 
 /* 시간 범위 입력 */
 .timerange{display:flex;align-items:center;gap:9px}
@@ -226,30 +226,30 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   border-radius:var(--radius);padding:14px 16px;cursor:pointer;transition:background .12s}
 .person:hover{background:var(--accent-soft)}
 .p-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.p-name{font-size:18px;font-weight:700}
-.p-sub{font-size:14px;color:var(--sub)}
+.p-name{font-size:20.5px;font-weight:700}
+.p-sub{font-size:16px;color:var(--sub)}
 .p-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px}
-.p-grid > div{font-size:14px}
-.p-grid span{display:block;font-size:11.5px;color:var(--sub);margin-bottom:1px}
+.p-grid > div{font-size:16px}
+.p-grid span{display:block;font-size:13px;color:var(--sub);margin-bottom:1px}
 
 /* 선택된 내담자 정보 */
 .picked-box{border:2px solid var(--accent);border-radius:var(--radius);
   padding:14px 16px;background:var(--accent-soft)}
 .picked-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-.picked-top b{font-size:19px}
+.picked-top b{font-size:22px}
 .picked-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
 .picked-grid > div{background:#fff;border-radius:var(--radius);padding:9px 12px}
-.picked-grid span{display:block;font-size:12px;color:var(--sub);margin-bottom:2px}
-.picked-grid b{font-size:14.5px}
+.picked-grid span{display:block;font-size:14px;color:var(--sub);margin-bottom:2px}
+.picked-grid b{font-size:16.5px}
 
 /* 내담자 상세 */
 .who-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;
   padding-bottom:14px;border-bottom:2px solid var(--accent);margin-bottom:16px}
-.who-head .nm{font-size:26px;font-weight:700;letter-spacing:-.5px}
-.who-head .meta{color:var(--sub);font-size:15px}
+.who-head .nm{font-size:30px;font-weight:700;letter-spacing:-.5px}
+.who-head .meta{color:var(--sub);font-size:17px}
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px}
 .chip{background:var(--accent-soft);color:var(--accent);border-radius:20px;
-  padding:5px 13px;font-size:13.5px;font-weight:600}
+  padding:5px 13px;font-size:15.5px;font-weight:600}
 .chip.risk{background:#fdeceb;color:var(--warn)}
 .tl{border-left:2px solid var(--line);margin-left:8px;padding-left:18px}
 .tl-item{position:relative;padding:12px 0;border-bottom:1px solid var(--line2);cursor:pointer}
@@ -257,20 +257,20 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .tl-item:hover{background:var(--accent-soft)}
 .tl-item::before{content:'';position:absolute;left:-25px;top:19px;width:11px;height:11px;
   border-radius:50%;background:var(--accent);border:2px solid var(--panel)}
-.tl-date{font-size:13px;color:var(--sub)}
-.tl-title{font-weight:700;font-size:15.5px;margin:2px 0}
-.tl-body{font-size:14px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-date{font-size:15px;color:var(--sub)}
+.tl-title{font-weight:700;font-size:18px;margin:2px 0}
+.tl-body{font-size:16px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 간이검사 문항 */
 .qcard{border:1px solid var(--line);border-radius:var(--radius);
   padding:18px 20px;margin-bottom:12px;background:#fff}
 .qcard.miss{border-color:var(--warn);background:#fdf5f4}
-.qtext{font-size:16.5px;font-weight:600;line-height:1.5;margin-bottom:14px}
+.qtext{font-size:19px;font-weight:600;line-height:1.5;margin-bottom:14px}
 .qno{display:inline-flex;align-items:center;justify-content:center;
   width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;
-  font-size:14px;font-weight:700;margin-right:10px;flex-shrink:0}
+  font-size:16px;font-weight:700;margin-right:10px;flex-shrink:0}
 .qopts{display:flex;flex-wrap:wrap;gap:8px}
-.qopt{flex:1;min-width:130px;padding:14px 12px;font-size:15px;
+.qopt{flex:1;min-width:130px;padding:14px 12px;font-size:17px;
   background:var(--bg);border:2px solid var(--line);border-radius:var(--radius);
   color:var(--ink);text-align:center;transition:all .12s}
 .qopt:hover{border-color:var(--accent);background:var(--accent-soft)}
@@ -279,10 +279,10 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 /* 검사 결과 점수 */
 .scores{display:flex;flex-direction:column;gap:14px;margin-top:8px}
 .score-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.score-label{width:80px;font-weight:700;font-size:16px;flex-shrink:0}
-.score-num{width:60px;text-align:right;font-weight:700;font-size:16px;flex-shrink:0}
+.score-label{width:80px;font-weight:700;font-size:18.5px;flex-shrink:0}
+.score-num{width:60px;text-align:right;font-weight:700;font-size:18.5px;flex-shrink:0}
 .score-num.over{color:var(--warn)}
-.score-cut{width:80px;font-size:13px;color:var(--sub);flex-shrink:0}
+.score-cut{width:80px;font-size:15px;color:var(--sub);flex-shrink:0}
 .bar-fill.over{background:var(--warn)}
 
 /* 드래그 앤 드롭 영역 */
@@ -293,8 +293,8 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .dropzone:hover{border-color:var(--accent);background:var(--accent-soft)}
 .dropzone.over{border-color:var(--accent);background:var(--accent-soft);
   border-style:solid;transform:scale(1.01)}
-.dropzone b{font-size:16.5px}
-.dropzone span{font-size:13.5px;color:var(--sub)}
+.dropzone b{font-size:19px}
+.dropzone span{font-size:15.5px;color:var(--sub)}
 .other-input{margin-top:7px}
 
 /* 카드 */
@@ -303,19 +303,19 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .card{background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius);padding:14px 16px}
 .card.warn{border-color:var(--warn);background:#fdeceb}
-.card-label{font-size:12px;color:var(--sub);margin-bottom:6px}
-.card-value{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.card-label{font-size:14px;color:var(--sub);margin-bottom:6px}
+.card-value{font-size:25.5px;font-weight:700;letter-spacing:-.5px}
 .card.warn .card-value{color:var(--warn)}
 
 /* 막대 */
 .bars{display:flex;flex-direction:column;gap:7px}
 .bar-row{display:flex;align-items:center;gap:10px}
-.bar-label{width:170px;flex-shrink:0;font-size:13px;overflow:hidden;
+.bar-label{width:170px;flex-shrink:0;font-size:15px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .bar-track{flex:1;height:18px;background:var(--line2);border-radius:3px;overflow:hidden}
 .bar-fill{height:100%;background:var(--accent);border-radius:3px;min-width:2px}
-.bar-num{width:88px;flex-shrink:0;text-align:right;font-size:13px;font-weight:600}
-.bar-pct{color:var(--sub);font-weight:400;margin-left:6px;font-size:12px}
+.bar-num{width:88px;flex-shrink:0;text-align:right;font-size:15px;font-weight:600}
+.bar-pct{color:var(--sub);font-weight:400;margin-left:6px;font-size:14px}
 
 @media(max-width:720px){
   .bar-label{width:96px}
@@ -435,7 +435,15 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-13 s';
+const APP_VERSION = '2026-08-20 nav';
+
+/* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
+   상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
+   여기 적힌 글자가 같아야 매칭됩니다. 관리자가 폼 이름을 바꾸면 이 목록도 같이 고쳐야 합니다. */
+const TOP_NAV_FORMS = ['스크리닝','집단상담','업무보고'];
+
+/* 내담자 상세 화면에 보여줄 폼과 순서 (마찬가지로 제목으로 매칭) */
+const CLIENT_FORM_ORDER = ['스크리닝','심층상담','생애주기 상담','긴급심리지원','긴급콜','대형재난 출동'];
 
 /* ── 연결 설정 ── */
 function getConfig(){
@@ -730,18 +738,21 @@ function needOther(f, list){
 function renderTabs(){
   const t=$('tabs'); t.innerHTML='';
   t.insertAdjacentHTML('beforeend',
-    `<button data-tab="home" onclick="openTab('home')">대시보드</button>`);
-  // 폼이 많아졌으므로 '작성' 탭만 두고 목록은 하나로 모읍니다
-  S.forms.forEach(f=>{
+    `<button data-tab="home" onclick="openTab('home')">대시보드</button>
+     <button data-tab="myclients" onclick="openTab('myclients')">내 내담자 보기</button>`);
+  // 상담사가 매일 쓰는 화면만 상단에 둡니다. 그 외 폼(심층상담·생애주기 상담·
+  // 긴급심리지원·긴급콜·대형재난 출동)은 내담자 상세 화면에서 작성합니다.
+  TOP_NAV_FORMS.forEach(title=>{
+    const f = S.forms.find(x=>x.title===title);
+    if(!f) return;
     t.insertAdjacentHTML('beforeend',
       `<button data-tab="form:${f.id}" onclick="openTab('form:${f.id}')">${esc(f.title)}</button>`);
   });
-  t.insertAdjacentHTML('beforeend',
-    `<button data-tab="list" onclick="openTab('list')">기록 목록</button>
-     <button data-tab="stats" onclick="openTab('stats')">통계</button>`);
   if(canManage()){
     t.insertAdjacentHTML('beforeend',
-      `<button data-tab="admin:forms" onclick="openTab('admin:forms')"
+      `<button data-tab="list" onclick="openTab('list')">기록 목록</button>
+       <button data-tab="stats" onclick="openTab('stats')">통계</button>
+       <button data-tab="admin:forms" onclick="openTab('admin:forms')"
         style="margin-left:auto;color:var(--accent)">관리</button>`);
   }
 }
@@ -786,6 +797,7 @@ function showTab(tab){
       || (tab.startsWith('list') && b.dataset.tab==='list')));
   const [mode,id] = tab.split(':');
   if(mode==='home'){ renderHome(); return; }
+  if(mode==='myclients'){ showMyClients(); return; }
   if(mode==='stats'){ renderStats(); return; }
   if(mode==='admin'){ renderAdmin(id); return; }
   if(mode==='list'){
@@ -1319,7 +1331,7 @@ async function toggleNewClient(){
 
   box.classList.remove('hidden');
   box.innerHTML = `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-    <div style="font-weight:700;margin-bottom:10px;font-size:16px">새 내담자 등록</div>
+    <div style="font-weight:700;margin-bottom:10px;font-size:18.5px">새 내담자 등록</div>
     <div class="grid">
       <div class="field"><label>이름<span class="req">*</span></label>
         <input type="text" id="nc_name"></div>
@@ -2214,8 +2226,8 @@ function showNewAccount(name, username, password){
       <div class="dl" style="margin-top:14px">
         <dt>이름</dt><dd>${esc(name)}</dd>
         <dt>주소</dt><dd>${esc(location.origin + location.pathname)}</dd>
-        <dt>아이디</dt><dd><b style="font-size:16px">${esc(username)}</b></dd>
-        <dt>비밀번호</dt><dd><b style="font-size:16px">${esc(password)}</b></dd>
+        <dt>아이디</dt><dd><b style="font-size:18.5px">${esc(username)}</b></dd>
+        <dt>비밀번호</dt><dd><b style="font-size:18.5px">${esc(password)}</b></dd>
       </div>
       <div class="hint" style="margin-top:10px">
         처음 로그인한 뒤 비밀번호를 바꾸도록 안내해 주시면 좋습니다.</div>`,
@@ -2332,48 +2344,17 @@ async function renderHome(){
     ${card('고위험군', highRisk+'명', highRisk>0)}
   </div>`;
 
-  // 자주 쓰는 기능
-  html += `<div class="eyebrow">자주 쓰는 기능</div><div class="quick">`;
-  html += qbtn('내 내담자 보기','내가 상담한 사람 목록','showMyClients()');
-  for(const f of S.forms){
-    html += qbtn(f.title+' 작성','새로 기록하기',`openTab('form:${f.id}')`);
-  }
-  for(const f of S.forms){
-    html += qbtn(f.title+' 목록','저장된 기록 보기',`openTab('list:${f.id}')`);
-  }
-  html += `</div>`;
-
-  // 검사
-  html += `<div class="eyebrow">검사</div><div class="quick">`;
-  html += qbtn('간이검사 실시','7문항 마음건강 검사','openSimpleTest()');
-  html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
-  html += qbtn('고위험군 관리', highRisk>0?`확인 필요 ${highRisk}명`:'해당 없음',
-               'showHighRisk()', highRisk>0?'alert':'');
-  html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
-  if(pending>0) html += qbtn('검사 연결 대기',`${pending}건 확인 필요`,'showPending()','alert');
-  html += `</div>`;
-
-  // 보드와 기록
-  html += `<div class="eyebrow">보드와 기록</div><div class="quick">`;
-  html += qbtn('통계 보기','자동 집계 화면',"openTab('stats')");
-  html += qbtn('리스트업 보드','전체 기록 한눈에',"soon('리스트업 보드')");
-  html += qbtn('특수 상담 리스트','긴급·심층 상담 모아보기',"soon('특수 상담 리스트')");
-  html += qbtn('세보니','통합 과업 관리',"soon('세보니 (통합과업)')");
-  html += qbtn('내보니','상담 만족도',"soon('내보니 (만족도)')");
-  html += qbtn('노무관리','출퇴근 기록',"soon('노무관리')");
-  html += `</div>`;
-
+  // 상담사는 검색과 '내 내담자 보기'(상단 메뉴)만으로 충분하므로, 관리자에게만
+  // 전체 현황을 보는 검사 관련 화면을 더 보여줍니다. 나머지 폼 작성은 상단 메뉴
+  // (스크리닝·집단상담·업무보고)와 내담자 상세 화면에서 합니다.
   if(canManage()){
-    html += `<div class="eyebrow">관리자 전용</div><div class="quick">`;
-    html += qbtn('데이터 관리','기록과 명부 훑어보기',"openTab('admin:grid')");
-    html += qbtn('내담자 DB','명부 양식과 인사이동',"openTab('admin:sync')");
-    html += qbtn('상세소속','소방서별 부서 목록',"openTab('admin:master')");
-    html += qbtn('사용자','계정과 비밀번호',"openTab('admin:users')");
-    if(isSuper()){
-      html += qbtn('폼과 항목','입력 화면 편집',"openTab('admin:forms')");
-      html += qbtn('지역','상위·하위지역 관리',"openTab('admin:regions')");
-      html += qbtn('수정 로그','누가 무엇을 바꿨는지',"openTab('admin:audit')");
-    }
+    html += `<div class="eyebrow">검사</div><div class="quick">`;
+    html += qbtn('간이검사 실시','7문항 마음건강 검사','openSimpleTest()');
+    html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
+    html += qbtn('고위험군 관리', highRisk>0?`확인 필요 ${highRisk}명`:'해당 없음',
+                 'showHighRisk()', highRisk>0?'alert':'');
+    html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
+    if(pending>0) html += qbtn('검사 연결 대기',`${pending}건 확인 필요`,'showPending()','alert');
     html += `</div>`;
   }
 
@@ -2453,19 +2434,19 @@ function testCellHTML(t){
   if(!t) return '<span style="color:var(--sub)">검사 없음</span>';
   const hi = (t.ptsd_score||0)>=CUT.ptsd || (t.dep_score||0)>=CUT.dep || (t.suicide_risk||0)>=CUT.suicide;
   return `<div>${fmtDate(t.tested_at)}</div>
-    <div style="font-size:13px;${hi?'color:var(--warn);font-weight:700':'color:var(--sub)'}">
+    <div style="font-size:15px;${hi?'color:var(--warn);font-weight:700':'color:var(--sub)'}">
       P${t.ptsd_score??'-'} / 우${t.dep_score??'-'} / 자${t.suicide_risk??'-'}
       ${hi?' · 고위험':''}</div>`;
 }
 function lastCellHTML(r, fname){
   if(!r) return '<span style="color:var(--sub)">기록 없음</span>';
   return `<div>${esc(fname[r.form_id]||'기록')}</div>
-    <div style="font-size:13px;color:var(--sub)">${fmtDate(r.created_at)}</div>`;
+    <div style="font-size:15px;color:var(--sub)">${fmtDate(r.created_at)}</div>`;
 }
 function statusChip(st){
   if(!st || st==='재직') return '';
   const warn = ['전출','퇴직'].includes(st);
-  return ` <span class="chip ${warn?'risk':''}" style="padding:2px 9px;font-size:12px">${esc(st)}</span>`;
+  return ` <span class="chip ${warn?'risk':''}" style="padding:2px 9px;font-size:14px">${esc(st)}</span>`;
 }
 
 async function peopleTable(rows, emptyMsg){
@@ -2619,9 +2600,9 @@ async function showClient(id){
       ${card('종합심리검사', (comps?.length||0)+'건')}
     </div>
     <div class="actions" style="flex-wrap:wrap">
-      ${S.forms.map(f=>`<button class="btn${f.links_client?'':' ghost'}"
-        onclick="startRecordFor('${p.id}','${f.id}')">${esc(f.title)} 작성</button>`).join('')}
-      <button class="btn ghost" onclick="openTab('home')">대시보드로</button>
+      ${CLIENT_FORM_ORDER.map(title=>S.forms.find(f=>f.title===title)).filter(Boolean)
+        .map(f=>`<button class="btn${f.links_client?'':' ghost'}"
+          onclick="startRecordFor('${p.id}','${f.id}')">${esc(f.title)} 작성</button>`).join('')}
     </div>
   </div>`;
 
@@ -2910,12 +2891,12 @@ function showTestResult(r){
       ${row('우울', r.dep, CUT.dep, 6)}
       ${row('자살위험', r.suicide, CUT.suicide, 3)}
     </div>
-    ${hi ? `<div class="msg bad" style="margin-top:18px;font-size:15px">
+    ${hi ? `<div class="msg bad" style="margin-top:18px;font-size:17px">
         <b>상담사와 이야기를 나눠보시길 권합니다.</b><br>
         기준을 넘은 항목이 있습니다. 힘든 시기를 혼자 견디지 않으셔도 됩니다.
         찾아가는 상담실 상담사가 곧 연락드릴 예정이며, 그전에라도 도움이 필요하시면
         자살예방 상담전화 <b>109</b>번으로 24시간 연락하실 수 있습니다.</div>`
-      : `<div class="msg info" style="margin-top:18px;font-size:15px">
+      : `<div class="msg info" style="margin-top:18px;font-size:17px">
         기준을 넘은 항목은 없습니다. 다만 점수와 무관하게 마음이 힘드실 때는
         언제든 상담을 신청하실 수 있습니다.</div>`}
     ${r.matched ? '' : `<div class="hint" style="margin-top:12px">
