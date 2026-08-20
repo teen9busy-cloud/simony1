@@ -443,7 +443,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 records';
+const APP_VERSION = '2026-08-20 agefix';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -1212,17 +1212,21 @@ function setMemberOverride(i, key, value){
 // 참여자의 명부에 없는 항목을 채우는 입력칸. 그 항목이 원래 드롭다운(select)이면
 // 여기서도 같은 선택지를 보여 줍니다(직무처럼 이미 정해진 목록이 있는 경우).
 // 목록에 없는 값은 다른 폼과 마찬가지로 '기타(직접 입력)'로 고르면 옆에 글자 입력칸이 열립니다.
+// 연령대는 폼마다 field_type을 'select'로 안 만들어 뒀을 수도 있지만, 값 자체는
+// 생년월일에서 자동으로 계산되는 고정된 목록이므로 항상 이 목록으로 드롭다운을 보여줍니다.
+const AGE_GROUPS = ['20대','30대','40대','50대','60대 이상'];
 function memberOverrideInputHTML(i, f, m, defaultValue){
   const domId = `mov_${i}_${f.field_key}`;
   const current = m._overrides?.[f.field_key] || defaultValue || '';
-  if(f.field_type !== 'select'){
+  const isAgeGroup = f.auto_fill === 'age_group';
+  if(f.field_type !== 'select' && !isAgeGroup){
     return `<input type="text" style="width:130px;padding:5px 7px;font-size:13px"
       placeholder="${esc(f.label)} 직접 입력" value="${esc(current)}"
       onchange="setMemberOverride(${i},'${f.field_key}',this.value)">`;
   }
   const regionId = m.region_id || $('f_region')?.value;
   const dynamic = !!f.lookup_source;
-  const list = dynamic ? lookupOptions(f.lookup_source, regionId) : (f.options||[]);
+  const list = isAgeGroup ? AGE_GROUPS : (dynamic ? lookupOptions(f.lookup_source, regionId) : (f.options||[]));
   const isOther = current && !list.includes(current);
   const opts = list.map(o=>`<option value="${esc(o)}" ${o===current?'selected':''}>${esc(o)}</option>`).join('');
   const other = needOther(f, list) ? `<option value="${OTHER}" ${isOther?'selected':''}>${OTHER}</option>` : '';
