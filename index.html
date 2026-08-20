@@ -183,6 +183,14 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .cnt{font-size:16px;font-weight:600;color:var(--accent);
   background:var(--accent-soft);padding:3px 10px;border-radius:12px;margin-left:6px}
 
+/* 표시 항목 고르기(표 위의 '표시 항목 ▾') */
+.col-picker{position:relative}
+.col-picker summary{list-style:none;cursor:pointer}
+.col-picker summary::-webkit-details-marker{display:none}
+.col-picker-box{position:absolute;right:0;top:calc(100% + 4px);z-index:5;
+  background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:0 4px 14px rgba(0,0,0,.12);padding:10px 14px;min-width:170px}
+
 /* 변경 이력 */
 .audit-day{font-size:15px;font-weight:700;color:var(--accent);
   background:var(--accent-soft);padding:7px 12px;border-radius:var(--radius);
@@ -435,7 +443,7 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 nav';
+const APP_VERSION = '2026-08-20 records';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -1107,28 +1115,35 @@ function memberPickerHTML(){
 function renderMemberArea(){
   const area = $('memberArea');
   if(!area) return;
-  // 저장할 때 이 사람의 소속·계급 등을 명부(또는 최근 기록)에서 자동으로 채우게 되므로,
-  // 명부에 없는 항목이나 최근 기록에서 짐작한 값은 여기서 보여주고 그 자리에서
-  // 확인·수정할 수 있게 합니다. 명부에서 바로 가져온 값은 믿을 만하므로 따로 보여주지 않습니다.
+  // 참여자마다 다른 값(소속·계급·직무·연령대 등)은 항상 여기서 보여 주고 그 자리에서
+  // 확인·수정할 수 있게 합니다. 명부에서 바로 가져온 값도 눈으로 확인할 수 있도록 보여 주되,
+  // 명부값은 믿을 만하므로 옅은 색으로, 명부에 없거나 최근 기록에서 짐작한 값은 눈에 띄는 색으로 표시합니다.
+  const noPersonalFields = (S.fields||[]).every(f=>!isPersonalField(f));
+  const tierStyle = { missing:'var(--warn)', recent:'var(--accent)', roster:'var(--sub)', override:'var(--accent-dark)' };
+  const tierLabel = s => s.tier==='missing' ? `명부에 ${esc(s.f.label)} 없음 →`
+    : s.tier==='recent' ? `${esc(s.f.label)} '${esc(s.value)}' (최근 기록에서 가져옴, 다르면 바꾸세요) →`
+    : s.tier==='override' ? `${esc(s.f.label)} '${esc(s.value)}' (직접 입력함) →`
+    : `${esc(s.f.label)} '${esc(s.value)}' (명부값, 다르면 바꾸세요) →`;
   const list = S.members.length
     ? `<div class="member-list">${S.members.map((m,i)=>{
-        const flagged = personalFieldStatus(m).filter(s=>s.tier==='missing'||s.tier==='recent');
+        const statuses = personalFieldStatus(m);
         return `<div class="member">
           <b>${esc(m.name)}</b>
           <span>${esc(m.birth_date||'생년월일 없음')} · ${esc(m.gender||'')}
             ${m.extra?.rank?' · '+esc(m.extra.rank):''}</span>
           <button class="btn ghost" onclick="removeMember(${i})">빼기</button>
-          ${flagged.length?`<div style="flex-basis:100%;display:flex;gap:12px;flex-wrap:wrap;margin-top:2px">
-            ${flagged.map(s=>`<label style="display:flex;align-items:center;gap:6px;
-                font-size:13px;color:${s.tier==='missing'?'var(--warn)':'var(--accent)'};font-weight:400">
-              ${s.tier==='missing'
-                 ? `명부에 ${esc(s.f.label)} 없음 →`
-                 : `${esc(s.f.label)} '${esc(s.value)}' (최근 기록에서 가져옴, 다르면 바꾸세요) →`}
+          ${statuses.length?`<div style="flex-basis:100%;display:flex;gap:12px;flex-wrap:wrap;margin-top:2px">
+            ${statuses.map(s=>`<label style="display:flex;align-items:center;gap:6px;
+                font-size:13px;color:${tierStyle[s.tier]};font-weight:400">
+              ${tierLabel(s)}
               ${memberOverrideInputHTML(i, s.f, m, s.value)}</label>`).join('')}
           </div>`:''}
         </div>`;}).join('')}</div>`
     : `<div class="empty" style="padding:20px">아직 참여자가 없습니다.
         이름으로 찾아 한 명씩 더해 주세요.</div>`;
+  const noFieldHint = noPersonalFields
+    ? `<div class="hint" style="margin:6px 0 0">이 폼에는 참여자마다 다르게 입력할 항목(소속·계급·직무 등)이
+        설정돼 있지 않습니다. 필요하면 관리 → 폼과 항목에서 이 폼에 항목을 추가해 주세요.</div>` : '';
 
   area.innerHTML = `<div class="client-box">
     <div class="client-row">
@@ -1145,6 +1160,7 @@ function renderMemberArea(){
       ${S.members.length?`<button class="btn ghost" onclick="clearMembers()">모두 지우기</button>`:''}
       <span class="hint" style="margin:0">저장하면 참여자마다 기록이 하나씩 만들어집니다</span>
     </div>
+    ${noFieldHint}
     ${list}</div>`;
 
   // 참여 인원 칸이 있으면 자동으로 맞춰 줍니다
@@ -1876,7 +1892,7 @@ const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
-  const nav = ['grid','데이터 관리','master','상세소속','users','사용자',
+  const nav = ['grid','데이터 관리','records','전체 기록','master','상세소속','users','사용자',
                'sync','내담자 DB','upload','검사 업로드','settings','설정'];
   if(isSuper()){
     nav.unshift('forms','폼과 항목');
@@ -1903,6 +1919,7 @@ function renderAdmin(sub){
     return;
   }
   if(sub==='grid') adminGrid();
+  else if(sub==='records') adminRecords();
   else if(sub==='audit') adminAudit();
   else if(sub==='forms') adminForms();
   else if(sub==='regions') adminRegions();
@@ -1942,6 +1959,281 @@ async function setClientHistoryVisible(v){
   if(error){ toast('저장하지 못했습니다: '+error.message,'bad'); return; }
   toast('설정을 저장했습니다');
   adminSettings();
+}
+
+/* ── 표 공통: 보이는 항목 고르기 + CSV로 내려받기 ──
+   '데이터 관리'(명부)와 '전체 기록' 표에서 함께 씁니다. 기본은 전부 표시이고,
+   체크를 풀면 그 항목만 표에서 숨깁니다(브라우저를 새로고침하면 다시 전부 표시됩니다). */
+function colPickerHTML(prefix, columns){
+  const hidden = S['_'+prefix+'Hidden'] || [];
+  return `<details class="col-picker">
+    <summary class="btn ghost">표시 항목 ▾</summary>
+    <div class="col-picker-box">
+      ${columns.map(([k,label])=>`<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-weight:400">
+        <input type="checkbox" ${hidden.includes(k)?'':'checked'}
+          onchange="toggleCol('${prefix}','${k}',this.checked)"> ${esc(label)}</label>`).join('')}
+    </div></details>`;
+}
+function toggleCol(prefix, key, checked){
+  const skey = '_'+prefix+'Hidden';
+  S[skey] = S[skey] || [];
+  if(checked) S[skey] = S[skey].filter(k=>k!==key);
+  else if(!S[skey].includes(key)) S[skey].push(key);
+  if(prefix==='grid') renderGridTable();
+  else if(prefix==='rec') renderRecordsTable();
+}
+function csvCell(v){
+  const s = v===null||v===undefined ? '' : String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function downloadCSV(filename, headers, rows){
+  if(!rows.length){ toast('내려받을 내용이 없습니다','bad'); return; }
+  const lines = [headers.map(csvCell).join(',')]
+    .concat(rows.map(r=>r.map(csvCell).join(',')));
+  // 맨 앞 BOM은 엑셀에서 한글이 깨지지 않게 하기 위한 표시입니다.
+  const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ── 데이터 관리: 명부를 표(엑셀형)로 훑어보기 ──
+   예전에 구글 시트를 열어서 쭉 훑어보던 것과 같은 용도입니다.
+   이름을 누르면 그 사람의 상세 화면(상담 이력 포함)으로 갑니다. */
+const GRID_COLUMNS = [
+  ['name','이름'], ['birth_date','생년월일'], ['gender','성별'], ['region','지역'],
+  ['department','소속'], ['rank','계급'], ['status','상태'],
+  ['personal_id','개인식별아이디'], ['digital_id','디지털 식별번호'], ['employee_no','사번'],
+];
+async function adminGrid(){
+  const html = `<div class="panel">
+    <h2>데이터 관리 <span class="cnt" id="gridCnt"></span></h2>
+    <div class="desc">내담자 명부를 표로 훑어봅니다. 이름을 누르면 그 사람의 상담 이력까지
+      볼 수 있는 상세 화면으로 갑니다. 상담 기록 자체는 각 폼의 '기록 목록' 화면이나
+      아래 '전체 기록' 화면에서 볼 수 있습니다.</div>
+    <div class="client-row" style="margin-bottom:14px;align-items:flex-end">
+      <div class="field" style="max-width:220px">
+        <label>지역</label>
+        <select id="gridRegion" onchange="onGridFilterChange()">
+          <option value="">전체(권한 있는 지역)</option>${regionOptionsHTML(S._gridRegion, {plain:true})}</select>
+      </div>
+      <div class="field" style="flex:1">
+        <label>이름·개인식별아이디·디지털 식별번호·사번으로 찾기</label>
+        <input type="text" id="gridQ" placeholder="비워두면 전체 표시"
+          value="${esc(S._gridQ||'')}" oninput="onGridFilterChange()">
+      </div>
+      <label class="hint" style="display:flex;align-items:center;gap:6px;cursor:pointer;margin:0 0 9px">
+        <input type="checkbox" id="gridShowLeft" ${S._gridShowLeft?'checked':''}
+          onchange="onGridFilterChange()"> 전출·퇴직자도 표시</label>
+      <button class="btn ghost" onclick="exportGridCSV()">엑셀로 내려받기</button>
+      ${colPickerHTML('grid', GRID_COLUMNS)}
+    </div>
+    <div class="scroll-x"><div id="gridTableBox" class="empty">불러오는 중…</div></div>
+  </div>`;
+  $('adminBody').innerHTML = html;
+  await loadGridTable();
+}
+let _gridDebounce = null;
+function onGridFilterChange(){
+  S._gridRegion = $('gridRegion').value;
+  S._gridQ = $('gridQ').value.trim();
+  S._gridShowLeft = $('gridShowLeft').checked;
+  clearTimeout(_gridDebounce);
+  _gridDebounce = setTimeout(loadGridTable, 250);
+}
+async function loadGridTable(){
+  const box = $('gridTableBox');
+  if(!box) return;
+  let q = sb.from('clients').select('*').order('name').limit(500);
+  if(S._gridRegion) q = q.eq('region_id', S._gridRegion);
+  if(!S._gridShowLeft) q = q.in('status', ['재직','휴직']);
+  if(S._gridQ){
+    // or() 안에서는 %가 아니라 *를 와일드카드로 씁니다 (한글 검색이 깨지는 걸 막기 위해)
+    const pat = S._gridQ.replace(/[*,()]/g, ' ').trim();
+    q = q.or(`name.ilike.*${pat}*,internal_id.ilike.*${pat}*,personal_id.ilike.*${pat}*,`
+      + `digital_id.ilike.*${pat}*,employee_no.ilike.*${pat}*`);
+  }
+  const { data, error } = await q;
+  if(error){ box.innerHTML = `<div class="msg bad">불러오지 못했습니다: ${esc(error.message)}</div>`; return; }
+  S._gridData = data || [];
+  renderGridTable();
+}
+function gridRowValues(c){
+  const rname = {}; S.allRegions.forEach(r=>rname[r.id]=r.name);
+  return {
+    name:c.name, birth_date:c.birth_date||'', gender:c.gender||'',
+    region:rname[c.region_id]||'', department:c.extra?.department||'', rank:c.extra?.rank||'',
+    status:c.status||'재직', personal_id:c.personal_id||c.internal_id||'',
+    digital_id:c.digital_id||'', employee_no:c.employee_no||'',
+  };
+}
+function renderGridTable(){
+  const box = $('gridTableBox');
+  if(!box) return;
+  const data = S._gridData || [];
+  const cnt = $('gridCnt'); if(cnt) cnt.textContent = data.length.toLocaleString()+'명'
+    + (data.length===500?' (500명까지만 표시)':'');
+  if(!data.length){ box.innerHTML = `<div class="empty">조건에 맞는 내담자가 없습니다.</div>`; return; }
+  const hidden = S._gridHidden || [];
+  const cols = GRID_COLUMNS.filter(([k])=>!hidden.includes(k));
+  box.innerHTML = `<table class="grid-table"><thead><tr>
+      ${cols.map(([,label])=>`<th>${esc(label)}</th>`).join('')}
+    </tr></thead><tbody>${data.map(c=>{
+      const v = gridRowValues(c);
+      return `<tr onclick="openClient('${c.id}')">${cols.map(([k],i)=>
+        `<td${i===0?' class="g-first"':''}>${esc(v[k])}</td>`).join('')}</tr>`;
+    }).join('')}</tbody></table>`;
+}
+function exportGridCSV(){
+  const hidden = S._gridHidden || [];
+  const cols = GRID_COLUMNS.filter(([k])=>!hidden.includes(k));
+  const rows = (S._gridData||[]).map(c=>{ const v = gridRowValues(c); return cols.map(([k])=>v[k]); });
+  downloadCSV('시모니_내담자명부.csv', cols.map(([,l])=>l), rows);
+}
+
+/* ── 전체 기록: 모든 폼의 상담 기록을 한 표로 훑어보기 ──
+   폼마다 항목이 다 달라서(스크리닝/심층상담/긴급심리지원 등) 항목 내용까지 표로 보여주진
+   않고, 어떤 기록이 있는지 훑어본 뒤 행을 눌러 전체 내용을 보는 방식입니다. */
+const REC_COLUMNS = [
+  ['form','폼'], ['created_at','작성일'], ['client','내담자'],
+  ['region','지역'], ['author','작성자'], ['group','집단'],
+];
+async function adminRecords(){
+  const html = `<div class="panel">
+    <h2>전체 기록 <span class="cnt" id="recCnt"></span></h2>
+    <div class="desc">모든 폼의 상담 기록을 한 표로 훑어봅니다. 행을 누르면 전체 내용을 볼 수
+      있습니다. 특정 폼 항목까지 표로 보려면 그 폼의 '기록 목록' 화면을 이용하세요.</div>
+    <div class="client-row" style="margin-bottom:14px;align-items:flex-end">
+      <div class="field" style="max-width:200px">
+        <label>폼</label>
+        <select id="recForm" onchange="onRecordsFilterChange()">
+          <option value="">전체</option>
+          ${S.forms.map(f=>`<option value="${f.id}" ${f.id===S._recForm?'selected':''}>${esc(f.title)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" style="max-width:200px">
+        <label>지역</label>
+        <select id="recRegion" onchange="onRecordsFilterChange()">
+          <option value="">전체(권한 있는 지역)</option>${regionOptionsHTML(S._recRegion, {plain:true})}</select>
+      </div>
+      <div class="field" style="max-width:150px">
+        <label>시작일</label>
+        <input type="date" id="recFrom" value="${esc(S._recFrom||'')}" onchange="onRecordsFilterChange()">
+      </div>
+      <div class="field" style="max-width:150px">
+        <label>종료일</label>
+        <input type="date" id="recTo" value="${esc(S._recTo||'')}" onchange="onRecordsFilterChange()">
+      </div>
+      <div class="field" style="flex:1">
+        <label>내담자·작성자 이름으로 찾기</label>
+        <input type="text" id="recQ" placeholder="비워두면 전체 표시"
+          value="${esc(S._recQ||'')}" oninput="onRecordsFilterChange()">
+      </div>
+      <button class="btn ghost" onclick="exportRecordsCSV()">엑셀로 내려받기</button>
+      ${colPickerHTML('rec', REC_COLUMNS)}
+    </div>
+    <div class="scroll-x"><div id="recTableBox" class="empty">불러오는 중…</div></div>
+  </div>`;
+  $('adminBody').innerHTML = html;
+  await loadRecordsTable();
+}
+let _recDebounce = null;
+function onRecordsFilterChange(){
+  S._recForm = $('recForm').value;
+  S._recRegion = $('recRegion').value;
+  S._recFrom = $('recFrom').value;
+  S._recTo = $('recTo').value;
+  S._recQ = $('recQ').value.trim();
+  clearTimeout(_recDebounce);
+  _recDebounce = setTimeout(loadRecordsTable, 250);
+}
+async function loadRecordsTable(){
+  const box = $('recTableBox');
+  if(!box) return;
+  let q = sb.from('form_records').select('*').order('created_at',{ascending:false}).limit(500);
+  if(S._recForm) q = q.eq('form_id', S._recForm);
+  if(S._recRegion) q = q.eq('region_id', S._recRegion);
+  if(S._recFrom) q = q.gte('created_at', S._recFrom);
+  if(S._recTo) q = q.lte('created_at', S._recTo+'T23:59:59');
+  if(S._recQ){
+    const pat = S._recQ.replace(/[*,()]/g, ' ').trim();
+    q = q.or(`client_name.ilike.*${pat}*,author_name.ilike.*${pat}*`);
+  }
+  const { data, error } = await q;
+  if(error){ box.innerHTML = `<div class="msg bad">불러오지 못했습니다: ${esc(error.message)}</div>`; return; }
+  S._recData = data || [];
+  renderRecordsTable();
+}
+function recRowValues(r){
+  const rname = {}; S.allRegions.forEach(x=>rname[x.id]=x.name);
+  const fname = {}; S.forms.forEach(f=>fname[f.id]=f.title);
+  return {
+    form:fname[r.form_id]||'', created_at:fmtDate(r.created_at),
+    client:r.client_name||'', region:rname[r.region_id]||'',
+    author:r.author_name||'', group:r.group_id?'예':'',
+  };
+}
+function renderRecordsTable(){
+  const box = $('recTableBox');
+  if(!box) return;
+  const data = S._recData || [];
+  const cnt = $('recCnt'); if(cnt) cnt.textContent = data.length.toLocaleString()+'건'
+    + (data.length===500?' (500건까지만 표시)':'');
+  if(!data.length){ box.innerHTML = `<div class="empty">조건에 맞는 기록이 없습니다.</div>`; return; }
+  const hidden = S._recHidden || [];
+  const cols = REC_COLUMNS.filter(([k])=>!hidden.includes(k));
+  S._recRows = data;   // openRecordDetailByIndex에서 씁니다
+  box.innerHTML = `<table class="grid-table"><thead><tr>
+      ${cols.map(([,label])=>`<th>${esc(label)}</th>`).join('')}
+    </tr></thead><tbody>${data.map((r,i)=>{
+      const v = recRowValues(r);
+      return `<tr onclick="openRecordDetailByIndex(${i})">${cols.map(([k],j)=>
+        `<td${j===0?' class="g-first"':''}>${esc(v[k])}</td>`).join('')}</tr>`;
+    }).join('')}</tbody></table>`;
+}
+function exportRecordsCSV(){
+  const hidden = S._recHidden || [];
+  const cols = REC_COLUMNS.filter(([k])=>!hidden.includes(k));
+  const rows = (S._recData||[]).map(r=>{ const v = recRowValues(r); return cols.map(([k])=>v[k]); });
+  downloadCSV('시모니_전체기록.csv', cols.map(([,l])=>l), rows);
+}
+// '전체 기록' 표에서 행을 누르면, 그 기록이 속한 폼의 항목 정의를 그때그때 불러와
+// 상세 내용을 보여줍니다(폼마다 항목이 다르므로 미리 다 불러두지 않습니다).
+async function openRecordDetailByIndex(i){
+  const r = S._recRows?.[i];
+  if(!r) return;
+  const form = S.forms.find(f=>f.id===r.form_id);
+  const { data: fields, error } = await sb.from('form_fields').select('*')
+    .eq('form_id', r.form_id).order('sort_order');
+  if(error){ toast('항목을 불러오지 못했습니다: '+error.message,'bad'); return; }
+  const rname = {}; S.allRegions.forEach(x=>rname[x.id]=x.name);
+  let rows = `<dt>폼</dt><dd>${esc(form?.title||'')}</dd>
+    <dt>작성일</dt><dd>${fmtDate(r.created_at)}</dd>
+    <dt>지역</dt><dd>${esc(rname[r.region_id]||'')}</dd>
+    <dt>작성자</dt><dd>${esc(r.author_name||'')}</dd>`;
+  if(form?.links_client){
+    rows += `<dt>내담자</dt><dd>${esc(r.client_name||'')} · ${esc(r.birth_date||'')} · ${esc(r.gender||'')} · ID ${esc(r.client_internal_id||'')}</dd>`;
+  }
+  for(const f of (fields||[])){
+    const v = r.data?.[f.field_key];
+    if(v===null||v===undefined||v==='') continue;
+    rows += `<dt>${esc(f.label)}</dt><dd>${esc(Array.isArray(v)?v.join(', '):typeof v==='boolean'?(v?'예':'아니오'):v)}</dd>`;
+  }
+  const ov=document.createElement('div');
+  ov.className='overlay';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  ov.innerHTML=`<div class="modal"><h3>${esc(form?.title||'기록')} 상세</h3>
+    <dl class="dl">${rows}</dl>
+    <div class="actions">
+      ${canEditRecord(r)?`<button class="btn" onclick="this.closest('.overlay').remove();editRecordModal(S._recRows[${i}])">수정</button>
+      <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
+        onclick="deleteRecord(S._recRows[${i}])">삭제</button>`:''}
+      <button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
 }
 
 /* ── 폼과 항목 ── */
