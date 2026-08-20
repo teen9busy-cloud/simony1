@@ -161,7 +161,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 /* 집단상담 참여자 */
 .member-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
   gap:8px;margin-top:12px}
-.member{display:flex;align-items:center;gap:9px;background:#fff;
+.member{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#fff;
   border:1px solid var(--line);border-left:4px solid var(--accent);
   border-radius:var(--radius);padding:10px 12px}
 .member b{font-size:18px}
@@ -877,6 +877,8 @@ async function renderForm(){
   if(isGroupForm()){
     if(S.client){ S.members=[S.client]; S.client=null; }
     renderMemberArea();
+    // 미리 들어와 있는 참여자(상세페이지에서 넘어온 경우)의 최근 기록도 찾아봅니다
+    S.members.forEach(m=>loadRecentFillFor(m).then(renderMemberArea));
   }else if(S.client){
     renderClientArea();     // 상세페이지에서 넘어온 경우 미리 선택된 상태로
     applyAutoFill();
@@ -1105,14 +1107,26 @@ function memberPickerHTML(){
 function renderMemberArea(){
   const area = $('memberArea');
   if(!area) return;
+  // 저장할 때 이 사람의 소속·계급 등을 명부(또는 최근 기록)에서 자동으로 채우게 되므로,
+  // 명부에 없는 항목이나 최근 기록에서 짐작한 값은 여기서 보여주고 그 자리에서
+  // 확인·수정할 수 있게 합니다. 명부에서 바로 가져온 값은 믿을 만하므로 따로 보여주지 않습니다.
   const list = S.members.length
-    ? `<div class="member-list">${S.members.map((m,i)=>`
-        <div class="member">
+    ? `<div class="member-list">${S.members.map((m,i)=>{
+        const flagged = personalFieldStatus(m).filter(s=>s.tier==='missing'||s.tier==='recent');
+        return `<div class="member">
           <b>${esc(m.name)}</b>
           <span>${esc(m.birth_date||'생년월일 없음')} · ${esc(m.gender||'')}
             ${m.extra?.rank?' · '+esc(m.extra.rank):''}</span>
           <button class="btn ghost" onclick="removeMember(${i})">빼기</button>
-        </div>`).join('')}</div>`
+          ${flagged.length?`<div style="flex-basis:100%;display:flex;gap:12px;flex-wrap:wrap;margin-top:2px">
+            ${flagged.map(s=>`<label style="display:flex;align-items:center;gap:6px;
+                font-size:13px;color:${s.tier==='missing'?'var(--warn)':'var(--accent)'};font-weight:400">
+              ${s.tier==='missing'
+                 ? `명부에 ${esc(s.f.label)} 없음 →`
+                 : `${esc(s.f.label)} '${esc(s.value)}' (최근 기록에서 가져옴, 다르면 바꾸세요) →`}
+              ${memberOverrideInputHTML(i, s.f, m, s.value)}</label>`).join('')}
+          </div>`:''}
+        </div>`;}).join('')}</div>`
     : `<div class="empty" style="padding:20px">아직 참여자가 없습니다.
         이름으로 찾아 한 명씩 더해 주세요.</div>`;
 
@@ -1165,8 +1179,57 @@ function addMember(c){
   S.members.push(c);
   renderMemberArea();
   toast(`${c.name} 님을 참여자에 더했습니다`);
+  // 명부에 없는 항목을 이 사람의 최근 상담 기록에서 찾아봅니다. 찾아지면 다시 그립니다.
+  loadRecentFillFor(c).then(renderMemberArea);
 }
 function removeMember(i){ S.members.splice(i,1); renderMemberArea(); }
+// 참여자 명부에 소속·계급 등이 비어 있을 때, 그 자리에서 직접 채워 넣은 값.
+// (명부 자체를 고치는 게 아니라 이번 기록에만 씁니다.)
+function setMemberOverride(i, key, value){
+  const m = S.members[i];
+  if(!m) return;
+  m._overrides = m._overrides || {};
+  const v = String(value||'').trim();
+  if(v) m._overrides[key] = v; else delete m._overrides[key];
+  renderMemberArea();
+}
+// 참여자의 명부에 없는 항목을 채우는 입력칸. 그 항목이 원래 드롭다운(select)이면
+// 여기서도 같은 선택지를 보여 줍니다(직무처럼 이미 정해진 목록이 있는 경우).
+// 목록에 없는 값은 다른 폼과 마찬가지로 '기타(직접 입력)'로 고르면 옆에 글자 입력칸이 열립니다.
+function memberOverrideInputHTML(i, f, m, defaultValue){
+  const domId = `mov_${i}_${f.field_key}`;
+  const current = m._overrides?.[f.field_key] || defaultValue || '';
+  if(f.field_type !== 'select'){
+    return `<input type="text" style="width:130px;padding:5px 7px;font-size:13px"
+      placeholder="${esc(f.label)} 직접 입력" value="${esc(current)}"
+      onchange="setMemberOverride(${i},'${f.field_key}',this.value)">`;
+  }
+  const regionId = m.region_id || $('f_region')?.value;
+  const dynamic = !!f.lookup_source;
+  const list = dynamic ? lookupOptions(f.lookup_source, regionId) : (f.options||[]);
+  const isOther = current && !list.includes(current);
+  const opts = list.map(o=>`<option value="${esc(o)}" ${o===current?'selected':''}>${esc(o)}</option>`).join('');
+  const other = needOther(f, list) ? `<option value="${OTHER}" ${isOther?'selected':''}>${OTHER}</option>` : '';
+  return `<select id="${domId}" style="width:150px;padding:5px 7px;font-size:13px"
+      onchange="onMemberOverrideSelect(${i},'${f.field_key}',this)">
+      <option value="">— 선택 —</option>${opts}${other}</select>
+    <input type="text" id="${domId}_other" style="width:120px;padding:5px 7px;font-size:13px"
+      class="${isOther?'':'hidden'}" placeholder="${esc(f.label)} 직접 입력"
+      value="${isOther?esc(current):''}"
+      onchange="setMemberOverride(${i},'${f.field_key}',this.value)">`;
+}
+// 드롭다운에서 '기타(직접 입력)'을 고르면 옆 글자칸만 열어 두고, 아직 저장(재렌더)하지
+// 않습니다. 재렌더를 하면 방금 연 글자칸이 다시 닫혀 버리기 때문입니다.
+function onMemberOverrideSelect(i, key, sel){
+  const other = $(sel.id+'_other');
+  if(sel.value === OTHER){
+    other?.classList.remove('hidden');
+    other?.focus();
+  }else{
+    if(other){ other.classList.add('hidden'); other.value=''; }
+    setMemberOverride(i, key, sel.value);
+  }
+}
 function clearMembers(){
   if(!confirm('참여자를 모두 지웁니다. 계속할까요?')) return;
   S.members=[]; renderMemberArea();
@@ -1263,22 +1326,62 @@ const CLIENT_FILL = {
 function isPersonalField(f){
   return !!CLIENT_FILL[f.field_key] || f.auto_fill==='age_group';
 }
-// 참여자 한 명(m)의 명부 값으로, 그 사람 몫의 개인별 항목 값을 만들어 준다.
-// (소속·상세부서·계급·직무는 clients.extra에서, 연령대는 생년월일로 계산)
-function personalOverridesFor(m){
-  const out = {};
+// 다른 폼에서는 같은 뜻의 항목이 이름이 다를 수 있습니다 (예: 이 폼은 'job', 저 폼은 'duty').
+// 과거 상담 기록에서 값을 찾을 때는 이 동의어들도 함께 찾아봅니다.
+const FIELD_SYNONYMS = {
+  station:['station','department'], dept:['dept','team','department'],
+  department:['department','team'], rank:['rank','client_rank'],
+  client_rank:['rank','client_rank'], job:['job','duty'], duty:['duty','job'],
+};
+// 참여자(m)의 최근 상담 기록 몇 건을 미리 찾아 캐시해 둡니다. 명부에 소속·계급·직무가
+// 비어 있을 때, 이 사람의 가장 최근 기록에 적혀 있던 값을 그다음 순위로 참고하기 위해서입니다.
+// (명부 값이 더 믿을 만하므로 명부보다 낮은 우선순위로만 씁니다.)
+async function loadRecentFillFor(m){
+  if(!m || m._recentFill) return;              // 이미 조회했으면 다시 조회하지 않습니다
+  m._recentFill = {};
+  const { data: past, error } = await sb.from('form_records')
+    .select('data,created_at').eq('client_id', m.id)
+    .order('created_at',{ascending:false}).limit(15);
+  if(error || !past?.length) return;
   for(const f of (S.fields||[])){
+    const syn = FIELD_SYNONYMS[f.field_key];
+    if(!syn) continue;
+    for(const rec of past){
+      let v=null;
+      for(const key of syn){ const got=rec.data?.[key]; if(got){ v=got; break; } }
+      if(v){ m._recentFill[f.field_key]=v; break; }
+    }
+  }
+}
+// 참여자 한 명(m)의 개인별 항목마다 어떤 값을 쓸지, 그리고 어디서 온 값인지 함께 돌려준다.
+// 우선순위: 이 자리에서 직접 고른 값 > 명부 값 > 최근 상담 기록에서 찾은 값 > 없음.
+// tier가 'roster'가 아닌 것(즉 'recent'·'missing')은 명부만큼 믿을 수 없으므로
+// 참여자 목록 화면에서 확인·수정할 수 있게 보여 줍니다.
+function personalFieldStatus(m){
+  const out = [];
+  for(const f of (S.fields||[])){
+    if(!isPersonalField(f)) continue;
+    if(m._overrides && m._overrides[f.field_key]){
+      out.push({ f, value:m._overrides[f.field_key], tier:'override' }); continue;
+    }
     if(f.auto_fill==='age_group'){
       const ag = ageGroupFromBirth(m.birth_date);
-      if(ag) out[f.field_key] = ag;
+      out.push(ag ? { f, value:ag, tier:'roster' } : { f, value:null, tier:'missing' });
       continue;
     }
     const sources = CLIENT_FILL[f.field_key];
-    if(!sources) continue;
     let v = null;
-    for(const key of sources){ const got = m.extra?.[key]; if(got){ v=got; break; } }
-    if(v) out[f.field_key] = v;
+    if(sources) for(const key of sources){ const got=m.extra?.[key]; if(got){ v=got; break; } }
+    if(v){ out.push({ f, value:v, tier:'roster' }); continue; }
+    const rv = m._recentFill?.[f.field_key];
+    out.push(rv ? { f, value:rv, tier:'recent' } : { f, value:null, tier:'missing' });
   }
+  return out;
+}
+// 참여자 한 명(m)의 개인별 항목 값만 뽑아 저장용 데이터로 만든다.
+function personalOverridesFor(m){
+  const out = {};
+  personalFieldStatus(m).forEach(s => { if(s.value) out[s.f.field_key] = s.value; });
   return out;
 }
 function prefillFromClient(c){
@@ -1478,6 +1581,107 @@ function focusMissing(firstEl){
   setTimeout(()=>focusable?.focus({ preventScroll:true }), 260);
 }
 
+// 화면에 그려진 입력칸 하나에서 지금 값을 읽어 온다. (id="fld_"+field_key 기준)
+// 새 기록 저장과 기존 기록 수정, 둘 다 여기서 값을 읽습니다.
+function readFieldValue(f){
+  const el = $('fld_'+f.field_key);
+  if(f.field_type==='multiselect'){
+    const v = [...document.querySelectorAll(`input[name="fld_${f.field_key}"]:checked`)].map(x=>x.value);
+    return v.length ? v : null;
+  }
+  if(f.field_type==='checkbox') return el ? el.checked : null;
+  if(f.field_type==='number') return (!el || el.value==='') ? null : Number(el.value);
+  if(f.field_type==='select') return selectValue('fld_'+f.field_key);
+  if(f.field_type==='timerange'){
+    const st=$('fld_'+f.field_key+'_start')?.value;
+    const en=$('fld_'+f.field_key+'_end')?.value;
+    // 구버전과 같은 형태(1400-1500)로 저장해 통계·인쇄에서 그대로 씁니다
+    return (st && en) ? st.replace(':','') + '-' + en.replace(':','') : null;
+  }
+  return el ? (el.value.trim() || null) : null;
+}
+// readFieldValue의 반대 — 저장돼 있던 값을 화면의 입력칸에 채워 넣는다. (기록 수정용)
+function setFieldValue(f, v){
+  if(v===null || v===undefined || v==='') return;
+  const id = 'fld_'+f.field_key;
+  if(f.field_type==='multiselect'){
+    (Array.isArray(v)?v:[v]).forEach(val=>{
+      document.querySelectorAll(`input[name="${id}"]`).forEach(cb=>{
+        if(cb.value===String(val)){ cb.checked=true; syncExclusiveLock(id); }
+      });
+    });
+    return;
+  }
+  if(f.field_type==='checkbox'){ const el=$(id); if(el) el.checked=!!v; return; }
+  if(f.field_type==='timerange'){
+    const m = String(v||'').match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+    if(m){
+      const st=$(id+'_start'), en=$(id+'_end');
+      if(st) st.value = m[1]+':'+m[2];
+      if(en) en.value = m[3]+':'+m[4];
+      recalcDuration();
+    }
+    return;
+  }
+  if(f.field_type==='select'){ setSelectValue(id, v); return; }
+  const el=$(id); if(el) el.value = v;
+}
+// 이 기록을 지금 로그인한 사람이 고치거나 지울 수 있는가 — 작성한 본인이거나, 관리자.
+function canEditRecord(r){
+  return !!(S.me && r && (r.author_id===S.me.id || canManage()));
+}
+// 잘못 입력한 기록을 지운다. 되돌릴 수 없으므로 한 번 더 확인을 구합니다.
+// (누가 언제 지웠는지는 form_records에 걸린 trg_audit_records가 그대로 기록에 남깁니다.)
+async function deleteRecord(r){
+  if(!canEditRecord(r)){ toast('이 기록을 지울 권한이 없습니다','bad'); return; }
+  const who = r.client_name ? `'${r.client_name}' 님의 ` : '';
+  if(!confirm(`${who}이 기록을 정말 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  const { error } = await sb.from('form_records').delete().eq('id', r.id);
+  if(error){ toast('삭제하지 못했습니다: '+error.message, 'bad'); return; }
+  toast('기록을 삭제했습니다');
+  document.querySelectorAll('.overlay').forEach(o=>o.remove());
+  if(S.tab) showTab(S.tab);
+}
+// 이미 저장된 기록 하나를 고친다. 원래 폼 그대로(항목 순서·선택지 포함)를 다시 그려
+// 지금 값으로 채운 뒤, 저장하면 그 항목만 업데이트합니다. 내담자(참여자) 자체는 바꾸지
+// 않습니다 — 사람을 잘못 골랐을 때는 이 기록을 지우고 새로 만들어야 합니다.
+async function editRecordModal(r){
+  const { data: fields } = await sb.from('form_fields').select('*')
+    .eq('form_id', r.form_id).eq('is_active', true).order('sort_order');
+  const editFields = fields || [];
+  const bySection = {};
+  for(const f of editFields){
+    const k = f.section || '입력 항목';
+    (bySection[k] = bySection[k] || []).push(f);
+  }
+  let body = '';
+  for(const [sec, list] of Object.entries(bySection)){
+    body += `<div class="section-title">${esc(sec)}</div><div class="grid">`
+      + list.map(f=>renderField(f, r.region_id)).join('') + `</div>`;
+  }
+  const title = (S.forms.find(x=>x.id===r.form_id)||{}).title || '기록';
+  modal(`${esc(title)} 수정`, body,
+    async ()=>{
+      const data = {};
+      const missing = [];
+      for(const f of editFields){
+        const v = readFieldValue(f);
+        if(f.required && (v===null || v==='')) missing.push(f.label);
+        if(v!==null) data[f.field_key] = v;
+      }
+      if(missing.length){
+        toast('채우지 않은 필수 항목이 있습니다: '+missing.slice(0,3).join(', '), 'bad');
+        return false;
+      }
+      const { error } = await sb.from('form_records').update({ data }).eq('id', r.id);
+      if(error){ toast('저장하지 못했습니다: '+error.message, 'bad'); return false; }
+      toast('기록을 수정했습니다');
+      if(S.tab) showTab(S.tab);   // 지금 보던 화면을 새 값으로 다시 불러옵니다
+      return true;
+    },
+    ()=>{ for(const f of editFields) setFieldValue(f, r.data?.[f.field_key]); });
+}
+
 async function saveRecord(){
   const btn=$('saveBtn');
   document.querySelectorAll('.err').forEach(e=>e.classList.remove('err'));
@@ -1500,24 +1704,7 @@ async function saveRecord(){
     // 여기서도 건너뜁니다. 저장 시 참여자마다 personalOverridesFor로 따로 채웁니다.
     if(isGroupForm() && isPersonalField(f)) continue;
     const el = $('fld_'+f.field_key);
-    let v = null;
-    if(f.field_type==='multiselect'){
-      v = [...document.querySelectorAll(`input[name="fld_${f.field_key}"]:checked`)].map(x=>x.value);
-      if(!v.length) v = null;
-    }else if(f.field_type==='checkbox'){
-      v = el ? el.checked : null;
-    }else if(f.field_type==='number'){
-      v = (!el || el.value==='') ? null : Number(el.value);
-    }else if(f.field_type==='select'){
-      v = selectValue('fld_'+f.field_key);
-    }else if(f.field_type==='timerange'){
-      const st=$('fld_'+f.field_key+'_start')?.value;
-      const en=$('fld_'+f.field_key+'_end')?.value;
-      // 구버전과 같은 형태(1400-1500)로 저장해 통계·인쇄에서 그대로 씁니다
-      v = (st && en) ? st.replace(':','') + '-' + en.replace(':','') : null;
-    }else{
-      v = el ? (el.value.trim() || null) : null;
-    }
+    const v = readFieldValue(f);
 
     if(f.required && (v===null || v==='' )){
       missing.push(f.label);
@@ -1535,6 +1722,26 @@ async function saveRecord(){
       + missing.slice(0,2).join(', ') + (missing.length>2?' 외':''), 'bad');
     focusMissing(firstMissingEl);
     return;
+  }
+
+  // 여러 명 동시 입력: 소속·계급 같은 개인별 항목은 화면에 공용 입력칸이 없고
+  // 참여자마다 명부에서 자동으로 채웁니다. 명부에 값이 없으면 위 참여자 목록에서
+  // 그 자리에 직접 채워 넣을 수 있게 해 뒀지만, 급한 상황(대형재난 등)에서는
+  // 그것까지 다 채우지 못하고 일단 저장부터 해야 할 때가 있으므로 막지는 않고
+  // 확인만 한 번 구합니다. (한 명 상담일 때는 이 항목이 여전히 필수면 그대로 막힙니다.)
+  if(isGroupForm() && S.members.length){
+    const reqPersonal = (S.fields||[]).filter(f=>isPersonalField(f) && f.required);
+    if(reqPersonal.length){
+      const bad = S.members
+        .map(m => ({ name:m.name, gap: reqPersonal.filter(f=>!personalOverridesFor(m)[f.field_key]) }))
+        .filter(x => x.gap.length);
+      if(bad.length){
+        const msg = `아래 참여자는 명부에 정보가 비어 있습니다 — `
+          + bad.map(x=>`${x.name}(${x.gap.map(f=>f.label).join('·')} 없음)`).join(', ')
+          + `.\n그래도 저장할까요? (해당 항목은 빈 채로 저장됩니다. 취소를 누르면 위에서 채울 수 있습니다)`;
+        if(!confirm(msg)) return;
+      }
+    }
   }
 
   // 소요시간이 지나치게 길면 오전·오후를 잘못 고른 경우가 많습니다.
@@ -1670,7 +1877,7 @@ function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
   const nav = ['grid','데이터 관리','master','상세소속','users','사용자',
-               'sync','내담자 DB','upload','검사 업로드'];
+               'sync','내담자 DB','upload','검사 업로드','settings','설정'];
   if(isSuper()){
     nav.unshift('forms','폼과 항목');
     nav.splice(4, 0, 'regions','지역');
@@ -1702,7 +1909,39 @@ function renderAdmin(sub){
   else if(sub==='master') adminMaster();
   else if(sub==='sync') adminSync();
   else if(sub==='upload') adminUpload();
+  else if(sub==='settings') adminSettings();
   else adminUsers();
+}
+
+/* ── 설정: 시모니 전체에 적용되는 값들 ── */
+async function adminSettings(){
+  const { data } = await sb.from('app_settings').select('*')
+    .eq('key','show_client_history_across_regions').maybeSingle();
+  const on = data ? !!data.value : true;   // 행이 없으면 기본값(보이게)
+  const html = `<div class="panel">
+    <h2>설정</h2>
+    <div class="desc">시모니 전체에 적용되는 값입니다. 중간관리자·최종관리자 모두 바꿀 수 있습니다.</div>
+    <div class="section-title">지역 이동 시 이전 상담 기록 접근</div>
+    <p style="margin:0 0 14px">내담자가 인사이동으로 다른 지역에 옮겨진 뒤에도, 지금 그 내담자를
+      담당하는 지역의 상담사가 예전 지역에서 쓴 상담 기록까지 이어서 볼 수 있게 할지 정합니다.
+      기본값은 '보이게'입니다.</div>
+    <div class="actions" style="margin-top:0;padding-top:0;border-top:0">
+      <button class="btn${on?'':' ghost'}" onclick="setClientHistoryVisible(true)">보이게 (기본값)</button>
+      <button class="btn${!on?'':' ghost'}" onclick="setClientHistoryVisible(false)">안 보이게</button>
+    </div>
+    <div class="hint" style="margin-top:10px">지금 설정: <b>${on?'보이게':'안 보이게'}</b>${
+      data?.updated_at ? ` · ${fmtDate(data.updated_at)}에 마지막으로 바뀜` : ''}</div>
+  </div>`;
+  $('adminBody').innerHTML = html;
+}
+async function setClientHistoryVisible(v){
+  const { error } = await sb.from('app_settings').upsert({
+    key:'show_client_history_across_regions', value:v,
+    updated_by:S.me.id, updated_at:new Date().toISOString(),
+  });
+  if(error){ toast('저장하지 못했습니다: '+error.message,'bad'); return; }
+  toast('설정을 저장했습니다');
+  adminSettings();
 }
 
 /* ── 폼과 항목 ── */
@@ -3141,7 +3380,12 @@ function openDetail(i){
   ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
   ov.innerHTML=`<div class="modal"><h3>${esc(S.form.title)} 상세</h3>
     <dl class="dl">${rows}</dl>
-    <div class="actions"><button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button></div>
+    <div class="actions">
+      ${canEditRecord(r)?`<button class="btn" onclick="this.closest('.overlay').remove();editRecordModal(S._recs[${i}])">수정</button>
+      <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
+        onclick="deleteRecord(S._recs[${i}])">삭제</button>`:''}
+      <button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button>
+    </div>
   </div>`;
   document.body.appendChild(ov);
 }
