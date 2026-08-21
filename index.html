@@ -2730,8 +2730,11 @@ function adminUpload(){
     <h2>종합심리검사 결과 올리기</h2>
     <div class="desc">PDF를 여러 장 한꺼번에 올리면 서버가 글자를 읽어
       이름·생년월일·소속을 찾아내고, 명부와 대조해 파일 이름을 정리한 뒤 저장합니다.</div>
-    <div class="msg info">파일 이름은 <b>지역_이름_생년월일8자리.pdf</b> 형식이면 가장 정확합니다.
-      형식이 달라도 내용에서 찾아보지만, 못 찾으면 '확인 대기'로 남습니다.</div>
+    <div class="msg info">파일 이름을 <b>지역 이름 생년월일8자리.pdf</b>로 해 주시면 가장 정확합니다.
+      <br>예: <b>거제 구경진 19820801.pdf</b> (띄어쓰기·밑줄 아무거나, 붙여 써도 됩니다)
+      <br>파일 이름을 바꾸기 어려우면, 검사지의 <b>성명칸에 '거제 구경진 19820801'</b>처럼
+      지역과 생년월일을 함께 적어 주셔도 읽어냅니다.
+      <br>둘 다 없으면 이름·소속·나이로 명부를 찾아보고, 확실하지 않으면 '확인 대기'로 남깁니다.</div>
     <div class="dropzone" id="dz_pdf"
       ondragover="event.preventDefault();this.classList.add('over')"
       ondragleave="this.classList.remove('over')"
@@ -2775,7 +2778,8 @@ async function uploadPdfs(files){
           <td style="font-size:13px">${esc(x.original)}</td>
           <td style="font-size:13px">${esc(x.renamed||'—')}</td>
           <td><b>${esc(x.name||'—')}</b></td>
-          <td>${esc(x.birth_date||'—')}</td>
+          <td>${esc(x.birth_date||'—')}${x.birth_from_roster
+              ?'<br><span class="hint">명부에서 채움</span>':''}</td>
           <td>${esc(x.risk_level||'—')}</td>
           <td style="font-size:13px">${x.original_kb!=null
               ? `${x.original_kb}KB → ${x.saved_kb}KB`
@@ -2785,8 +2789,14 @@ async function uploadPdfs(files){
               :x.status==='pending'?'<span style="color:var(--warn)">확인 대기</span>'
               :`<span style="color:var(--warn)">실패: ${esc(x.reason||'')}</span>`}
             ${x.duplicate?`<br><span class="chip risk" style="margin-top:4px">이미 ${x.duplicate.count}건 있음
-              · ${fmtDate(x.duplicate.last_at)}</span>`:''}</td>
-          <td>${x.id?`<button class="btn ghost" style="padding:6px 12px"
+              · ${fmtDate(x.duplicate.last_at)}</span>`:''}
+            ${x.ai_error?`<br><span class="hint" style="color:var(--warn)">AI 분석 실패: ${esc(x.ai_error)}</span>`
+              :(x.id && !x.ai_used)?`<br><span class="hint">AI가 내용을 읽지 못했습니다
+                (글자 ${x.text_chars??0}자)</span>`:''}</td>
+          <td style="white-space:nowrap">
+            ${(x.id && x.status==='pending')?`<button class="btn" style="padding:6px 12px"
+              onclick="openPendingLink('${x.id}','${jsq(x.name)}','${jsq(x.birth_date)}')">연결하기</button> `:''}
+            ${x.id?`<button class="btn ghost" style="padding:6px 12px"
             onclick="deleteCompTest('${x.id}','${jsq(x.name)}',this)">지우기</button>`:''}</td>
         </tr>`).join('')}
       </tbody></table></div>
@@ -4178,7 +4188,19 @@ function openPendingLink(testId, name, birth){
         toast((r.fixed && r.fixed.length)
           ? `${S._linkPick.name} 님과 연결하고 ${r.fixed.length}곳을 바로잡았습니다`
           : `${S._linkPick.name} 님과 연결했습니다`);
-        showPending();
+        // 업로드 결과표에서 연결한 경우에는 그 줄만 고쳐 줍니다.
+        // (화면을 통째로 바꾸면 방금 올린 결과 목록이 사라져 버립니다.)
+        const upRow = document.getElementById('upRow_'+testId);
+        if(upRow){
+          const tds = upRow.querySelectorAll('td');
+          if(tds[2]) tds[2].innerHTML = `<b>${esc(S._linkPick.name)}</b>`;
+          if(tds[3]) tds[3].textContent = S._linkPick.birth_date || '';
+          if(tds[6]) tds[6].innerHTML = '직접 연결';
+          const btn = upRow.querySelector('button.btn:not(.ghost)');
+          if(btn) btn.remove();
+        }else{
+          showPending();
+        }
         return true;
       }catch(e){ toast(e.message,'bad'); return false; }
     },
