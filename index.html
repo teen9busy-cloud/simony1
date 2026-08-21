@@ -3997,27 +3997,88 @@ async function showPending(){
   const c=$('content');
   c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
   const [{ data: comps }, { data: simples }] = await Promise.all([
-    sb.from('comp_tests').select('*').neq('match_status','matched').limit(200),
-    sb.from('simple_tests').select('*').neq('match_status','matched').limit(200),
+    sb.from('comp_tests').select('*').neq('match_status','matched')
+      .order('created_at',{ascending:false}).limit(200),
+    sb.from('simple_tests').select('*').neq('match_status','matched')
+      .order('tested_at',{ascending:false}).limit(200),
   ]);
   const rows=[...(comps||[]).map(x=>({...x,kind:'종합심리검사'})),
               ...(simples||[]).map(x=>({...x,kind:'간이검사'}))];
   let html=`<div class="panel"><h2>검사 연결 대기</h2>
-    <div class="desc">이름·생년월일이 명부와 맞지 않아 내담자를 정하지 못한 검사입니다.
-      연결 화면은 검사 파이프라인과 함께 붙습니다.</div>`;
+    <div class="desc">이름·생년월일이 명부와 맞지 않거나 같은 이름이 여러 명이라
+      자동으로 내담자를 정하지 못한 검사입니다. '연결하기'를 눌러 맞는 내담자를 찾아 이어 주세요.</div>`;
   if(!rows.length){
     html += `<div class="empty">대기 중인 검사가 없습니다.</div>`;
   }else{
     html += `<table><thead><tr><th>종류</th><th>이름</th><th>생년월일</th>
-      <th>원본 파일명</th></tr></thead><tbody>`;
+      <th>원본 파일명</th><th>메모</th><th></th></tr></thead><tbody>`;
     rows.forEach(t=>{
+      const canLink = t.kind==='종합심리검사';   // 간이검사 연결은 아직 준비 중입니다
       html += `<tr><td>${esc(t.kind)}</td><td><b>${esc(t.client_name||'')}</b></td>
-        <td>${esc(t.birth_date||'')}</td><td>${esc(t.source_filename||'—')}</td></tr>`;
+        <td>${esc(t.birth_date||'')}</td><td style="font-size:13px">${esc(t.source_filename||'—')}</td>
+        <td style="font-size:13px;color:var(--sub)">${esc(t.match_note||'—')}</td>
+        <td>${canLink
+          ? `<button class="btn ghost" style="padding:6px 12px"
+               onclick='openPendingLink("${t.id}", ${JSON.stringify(t.client_name||'')}, ${JSON.stringify(t.birth_date||'')})'>연결하기</button>`
+          : `<span class="hint">연결 기능 준비 중</span>`}</td></tr>`;
     });
     html += `</tbody></table>`;
   }
   html += `<div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div></div>`;
   c.innerHTML=html;
+}
+
+// '연결하기' — 종합심리검사 결과 하나를 명부의 실제 내담자와 사람이 직접 이어 줍니다.
+// 서버의 /api/comp-tests/:id/link 를 씁니다(관리자 권한 확인 + region_id 자동 채움까지 처리).
+function openPendingLink(testId, name, birth){
+  S._linkPick = null;
+  const body = `
+    <div class="field"><label>이름으로 내담자 찾기</label>
+      <input type="text" id="linkSearch" value="${esc(name||'')}" placeholder="이름"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();runLinkSearch()}"></div>
+    <div class="actions" style="margin-top:0"><button class="btn ghost" type="button"
+      onclick="runLinkSearch()">찾기</button></div>
+    <div id="linkResults" style="margin-top:12px"></div>
+    <div id="linkPicked" class="hint" style="margin-top:8px"></div>`;
+  modal(`검사 연결 — ${esc(name||'이름 없음')} · ${esc(birth||'생년월일 없음')}`, body,
+    async ()=>{
+      if(!S._linkPick){ toast('먼저 연결할 내담자를 골라 주세요','bad'); return false; }
+      try{
+        await apiCall(`/api/comp-tests/${testId}/link`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ client_id: S._linkPick.id }),
+        });
+        toast(`${S._linkPick.name} 님과 연결했습니다`);
+        showPending();
+        return true;
+      }catch(e){ toast(e.message,'bad'); return false; }
+    },
+    ()=>runLinkSearch());
+}
+async function runLinkSearch(){
+  const q = $('linkSearch').value.trim();
+  const box = $('linkResults');
+  if(!q){ box.innerHTML=''; return; }
+  box.innerHTML = '<div class="hint">찾는 중…</div>';
+  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
+  const { data, error } = await sb.from('clients').select('*').ilike('name', `%${q}%`).limit(30);
+  if(error){ box.innerHTML = `<div class="msg bad">${esc(error.message)}</div>`; return; }
+  if(!data.length){
+    box.innerHTML = `<div class="hint">'${esc(q)}' 이름의 내담자가 없습니다.</div>`;
+    return;
+  }
+  box.innerHTML = '<div class="results">' + data.map(c=>
+    `<div onclick='pickLinkCandidate(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+      <b>${esc(c.name)}</b> · ${esc(c.birth_date||'생년월일 없음')} · ${esc(rname[c.region_id]||'—')}
+      ${[c.extra?.department,c.extra?.rank].filter(Boolean).length
+        ? ' · '+esc([c.extra?.department,c.extra?.rank].filter(Boolean).join(' / ')) : ''}
+    </div>`).join('') + '</div>';
+}
+function pickLinkCandidate(c){
+  S._linkPick = c;
+  const box = $('linkPicked');
+  if(box) box.innerHTML = `<b>${esc(c.name)}</b>(${esc(c.birth_date||'생년월일 없음')}) 선택됨 —
+    저장을 누르면 이 검사와 연결됩니다.`;
 }
 
 /* ═══════════════════════════════════════════════════
