@@ -487,6 +487,10 @@ function resetConfig(){
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// onclick="..." 안에 넣을 문자열을 안전하게 만듭니다.
+// 이름에 따옴표가 섞이면 속성이 중간에 끊겨 버튼이 아예 동작하지 않기 때문입니다.
+const jsq = s => String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+  .replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/[\r\n]/g,' ');
 function show(v){ ['setupView','loginView','appView','publicTestView'].forEach(x=>$(x).classList.toggle('hidden',x!==v)); }
 function toast(msg,kind){
   const t=document.createElement('div');
@@ -2783,7 +2787,7 @@ async function uploadPdfs(files){
             ${x.duplicate?`<br><span class="chip risk" style="margin-top:4px">이미 ${x.duplicate.count}건 있음
               · ${fmtDate(x.duplicate.last_at)}</span>`:''}</td>
           <td>${x.id?`<button class="btn ghost" style="padding:6px 12px"
-            onclick="deleteCompTest('${x.id}', ${JSON.stringify(x.name||'')}, this)">지우기</button>`:''}</td>
+            onclick="deleteCompTest('${x.id}','${jsq(x.name)}',this)">지우기</button>`:''}</td>
         </tr>`).join('')}
       </tbody></table></div>
       <div class="actions"><button class="btn ghost" onclick="showCompTests()">결과 목록 보기</button></div>`;
@@ -3900,12 +3904,15 @@ async function showClient(id){
     html += `<div class="empty">검사 기록이 없습니다.</div>`;
   }else{
     html += `<table><thead><tr><th>검사일</th><th>PTSD</th><th>우울</th>
-      <th>자살위험</th><th>판정</th></tr></thead><tbody>`;
+      <th>자살위험</th><th>판정</th>${canManage()?'<th></th>':''}</tr></thead><tbody>`;
     simples.forEach(t=>{
       const hi=(t.suicide_risk||0)>=1||(t.ptsd_score||0)>=6||(t.dep_score||0)>=3;
-      html += `<tr><td>${fmtDate(t.tested_at)}</td><td>${t.ptsd_score??'—'}</td>
+      html += `<tr id="stRow_${esc(t.id)}"><td>${fmtDate(t.tested_at)}</td><td>${t.ptsd_score??'—'}</td>
         <td>${t.dep_score??'—'}</td><td>${t.suicide_risk??'—'}</td>
-        <td>${hi?'<b style="color:var(--warn)">고위험</b>':'정상'}</td></tr>`;
+        <td>${hi?'<b style="color:var(--warn)">고위험</b>':'정상'}</td>
+        ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
+          onclick="deleteSimpleTest('${t.id}','${jsq(t.client_name)}',this)">지우기</button></td>`:''}
+        </tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -3917,12 +3924,16 @@ async function showClient(id){
     html += `<div class="empty">검사 기록이 없습니다.</div>`;
   }else{
     html += `<table><thead><tr><th>등록일</th><th>검사 종류</th><th>위험도</th>
-      <th>해석지</th></tr></thead><tbody>`;
+      <th>결과지</th>${canManage()?'<th></th>':''}</tr></thead><tbody>`;
     comps.forEach(t=>{
-      html += `<tr><td>${fmtDate(t.created_at)}</td><td>${esc(t.test_type||'—')}</td>
+      html += `<tr id="ctRow_${esc(t.id)}"><td>${fmtDate(t.created_at)}</td>
+        <td>${esc(t.test_type||'—')}</td>
         <td>${esc(t.risk_level||'—')}</td>
-        <td>${t.pdf_url?`<a href="${esc(t.pdf_url)}" target="_blank" rel="noopener"
-          style="color:var(--accent);font-weight:600">결과지 열기</a>`:'—'}</td></tr>`;
+        <td>${t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
+          style="color:var(--accent);font-weight:600">결과지 열기</a>`:'—'}</td>
+        ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
+          onclick="deleteCompTest('${t.id}','${jsq(t.client_name)}',this)">지우기</button></td>`:''}
+        </tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -3979,25 +3990,46 @@ async function showCompTests(){
   const c=$('content');
   c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
   const { data } = await sb.from('comp_tests').select('*')
-    .order('created_at',{ascending:false}).limit(300);
-  let html=`<div class="panel"><h2>종합심리검사 결과</h2>
-    <div class="desc">${data?.length||0}건</div>`;
-  if(!data?.length){
-    html += `<div class="empty">등록된 결과가 없습니다.
-      <br>검사 파이프라인이 연결되면 여기에 쌓입니다.</div>`;
-  }else{
-    // 같은 사람의 같은 검사가 여러 번 올라온 건 눈에 띄게 표시합니다
-    const seen={};
-    data.forEach(t=>{
+    .order('created_at',{ascending:false}).limit(1000);
+  S._compTests = data || [];
+  c.innerHTML = `<div class="panel"><h2>종합심리검사 결과</h2>
+    <div class="field" style="max-width:420px;margin-top:10px">
+      <label>이름·생년월일·검사 종류로 찾기</label>
+      <input type="text" id="ctSearch" placeholder="예: 강기훈  또는  1993  또는  MMPI"
+        oninput="renderCompTests()"></div>
+    <div id="ctBody"></div>
+    <div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div>
+  </div>`;
+  renderCompTests();
+}
+function renderCompTests(){
+  const box=$('ctBody'); if(!box) return;
+  const all=S._compTests||[];
+  const q=($('ctSearch')?.value||'').trim().toLowerCase();
+  const rows = q ? all.filter(t=>[t.client_name,t.birth_date,t.test_type,t.risk_level,
+      t.source_filename].some(v=>String(v||'').toLowerCase().includes(q))) : all;
+
+  // 같은 사람의 같은 검사가 여러 번 올라온 건 (검색과 무관하게) 눈에 띄게 표시합니다
+  const seen={};
+  all.forEach(t=>{
+    const k=(t.client_id||t.client_name||'')+'|'+(t.birth_date||'')+'|'+(t.test_type||'');
+    seen[k]=(seen[k]||0)+1;
+  });
+
+  if(!all.length){
+    box.innerHTML=`<div class="empty">등록된 결과가 없습니다.</div>`; return;
+  }
+  if(!rows.length){
+    box.innerHTML=`<div class="empty">'${esc(q)}'와 맞는 검사가 없습니다.</div>`; return;
+  }
+  box.innerHTML = `<div class="desc" style="margin:10px 0">${rows.length}건${
+      q?` (전체 ${all.length}건 중)`:''}</div>
+    <div style="overflow:auto"><table><thead><tr><th>등록일</th><th>이름</th><th>생년월일</th>
+      <th>검사 종류</th><th>위험도</th><th>연결</th><th>결과지</th>
+      ${canManage()?'<th></th>':''}</tr></thead><tbody>`
+    + rows.map(t=>{
       const k=(t.client_id||t.client_name||'')+'|'+(t.birth_date||'')+'|'+(t.test_type||'');
-      seen[k]=(seen[k]||0)+1;
-    });
-    html += `<table><thead><tr><th>등록일</th><th>이름</th><th>생년월일</th>
-      <th>검사 종류</th><th>위험도</th><th>연결</th><th>해석지</th>
-      ${canManage()?'<th></th>':''}</tr></thead><tbody>`;
-    data.forEach(t=>{
-      const k=(t.client_id||t.client_name||'')+'|'+(t.birth_date||'')+'|'+(t.test_type||'');
-      html += `<tr id="ctRow_${esc(t.id)}"><td>${fmtDate(t.created_at)}</td>
+      return `<tr id="ctRow_${esc(t.id)}"><td>${fmtDate(t.created_at)}</td>
         <td><b>${esc(t.client_name||'')}</b>${seen[k]>1
           ? ` <span class="chip risk">중복 ${seen[k]}건</span>`:''}</td>
         <td>${esc(t.birth_date||'')}</td><td>${esc(t.test_type||'—')}</td>
@@ -4005,16 +4037,25 @@ async function showCompTests(){
         <td>${t.match_status==='matched'?'연결됨'
              :t.match_status==='manual'?'직접 연결'
              :'<span style="color:var(--warn)">대기</span>'}</td>
-        <td>${t.pdf_url?`<a href="${esc(t.pdf_url)}" target="_blank" rel="noopener"
+        <td>${t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
           style="color:var(--accent);font-weight:600">열기</a>`:'—'}</td>
         ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
-          onclick="deleteCompTest('${t.id}', ${JSON.stringify(t.client_name||'')}, this)">지우기</button></td>`:''}
+          onclick="deleteCompTest('${t.id}','${jsq(t.client_name)}',this)">지우기</button></td>`:''}
         </tr>`;
-    });
-    html += `</tbody></table>`;
-  }
-  html += `<div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div></div>`;
-  c.innerHTML=html;
+    }).join('')
+    + `</tbody></table></div>`;
+}
+
+/* 결과지 PDF 열기.
+   버킷을 비공개로 두었기 때문에 주소를 그대로 열면 안 되고,
+   서버에서 잠깐만 쓸 수 있는 임시 주소를 받아 엽니다. */
+async function openCompPdf(id){
+  try{
+    const res = await apiCall(`/api/comp-tests/${id}/file`);
+    const r = await res.json();
+    if(!r.url) throw new Error('결과지 주소를 받지 못했습니다');
+    window.open(r.url, '_blank', 'noopener');
+  }catch(e){ toast(e.message,'bad'); }
 }
 
 /* 잘못 올렸거나 중복으로 올라온 종합심리검사 결과 하나를 지웁니다.
@@ -4034,7 +4075,27 @@ async function deleteCompTest(id, name, btn){
     toast(r.file_removed===false && r.file_note
       ? `기록은 지웠지만 ${r.file_note}`
       : '검사 결과를 지웠습니다');
+    if(S._compTests) S._compTests = S._compTests.filter(x=>x.id!==id);
     const row = document.getElementById('ctRow_'+id) || document.getElementById('upRow_'+id);
+    if(row) row.remove();
+    else if(btn) btn.closest('tr')?.remove();
+  }catch(e){
+    toast(e.message,'bad');
+    if(btn){ btn.disabled=false; btn.textContent=old; }
+  }
+}
+
+// 간이검사 기록 하나를 지웁니다 (실수로 두 번 제출된 경우 등).
+async function deleteSimpleTest(id, name, btn){
+  if(!canManage()){ toast('관리자만 지울 수 있습니다','bad'); return; }
+  const who = name ? `'${name}' 님의 ` : '';
+  if(!confirm(`${who}간이검사 기록을 지울까요? 되돌릴 수 없습니다.`)) return;
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='지우는 중…'; }
+  try{
+    await apiCall(`/api/simple-tests/${id}`, { method:'DELETE' });
+    toast('간이검사 기록을 지웠습니다');
+    const row = document.getElementById('stRow_'+id);
     if(row) row.remove();
     else if(btn) btn.closest('tr')?.remove();
   }catch(e){
