@@ -2762,13 +2762,17 @@ async function uploadPdfs(files){
       </div>
       <div style="overflow:auto"><table><thead><tr>
         <th>원본 파일</th><th>바뀐 이름</th><th>이름</th><th>생년월일</th>
-        <th>위험도</th><th>결과</th></tr></thead><tbody>
+        <th>위험도</th><th>용량</th><th>결과</th></tr></thead><tbody>
         ${(r.results||[]).map(x=>`<tr>
           <td style="font-size:13px">${esc(x.original)}</td>
           <td style="font-size:13px">${esc(x.renamed||'—')}</td>
           <td><b>${esc(x.name||'—')}</b></td>
           <td>${esc(x.birth_date||'—')}</td>
           <td>${esc(x.risk_level||'—')}</td>
+          <td style="font-size:13px">${x.original_kb!=null
+              ? `${x.original_kb}KB → ${x.saved_kb}KB`
+                + (x.saved_pct>0 ? `<br><span style="color:var(--warn)">${x.saved_pct}% 절약</span>` : '')
+              : '—'}</td>
           <td>${x.status==='matched'?'연결됨'
               :x.status==='pending'?'<span style="color:var(--warn)">확인 대기</span>'
               :`<span style="color:var(--warn)">실패: ${esc(x.reason||'')}</span>`}</td>
