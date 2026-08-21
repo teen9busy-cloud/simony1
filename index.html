@@ -2755,15 +2755,19 @@ async function uploadPdfs(files){
     const okCnt=(r.results||[]).filter(x=>x.status==='matched').length;
     const pendCnt=(r.results||[]).filter(x=>x.status==='pending').length;
     const failCnt=(r.results||[]).filter(x=>x.status==='failed').length;
+    const dupCnt=(r.results||[]).filter(x=>x.duplicate).length;
     box.innerHTML = `<div class="cards" style="margin-top:16px">
         ${card('자동 연결', okCnt+'건')}
         ${card('확인 대기', pendCnt+'건', pendCnt>0)}
         ${card('실패', failCnt+'건', failCnt>0)}
       </div>
+      ${dupCnt>0?`<div class="msg info" style="margin-top:12px">같은 사람의 같은 검사가 이미
+        있는 파일이 ${dupCnt}건 있습니다. 재검사라면 그대로 두시고, 실수로 두 번 올린 것이라면
+        아래 표에서 '지우기'를 눌러 주세요.</div>`:''}
       <div style="overflow:auto"><table><thead><tr>
         <th>원본 파일</th><th>바뀐 이름</th><th>이름</th><th>생년월일</th>
-        <th>위험도</th><th>용량</th><th>결과</th></tr></thead><tbody>
-        ${(r.results||[]).map(x=>`<tr>
+        <th>위험도</th><th>용량</th><th>결과</th><th></th></tr></thead><tbody>
+        ${(r.results||[]).map(x=>`<tr id="upRow_${esc(x.id||'')}">
           <td style="font-size:13px">${esc(x.original)}</td>
           <td style="font-size:13px">${esc(x.renamed||'—')}</td>
           <td><b>${esc(x.name||'—')}</b></td>
@@ -2775,7 +2779,11 @@ async function uploadPdfs(files){
               : '—'}</td>
           <td>${x.status==='matched'?'연결됨'
               :x.status==='pending'?'<span style="color:var(--warn)">확인 대기</span>'
-              :`<span style="color:var(--warn)">실패: ${esc(x.reason||'')}</span>`}</td>
+              :`<span style="color:var(--warn)">실패: ${esc(x.reason||'')}</span>`}
+            ${x.duplicate?`<br><span class="chip risk" style="margin-top:4px">이미 ${x.duplicate.count}건 있음
+              · ${fmtDate(x.duplicate.last_at)}</span>`:''}</td>
+          <td>${x.id?`<button class="btn ghost" style="padding:6px 12px"
+            onclick="deleteCompTest('${x.id}', ${JSON.stringify(x.name||'')}, this)">지우기</button>`:''}</td>
         </tr>`).join('')}
       </tbody></table></div>
       <div class="actions"><button class="btn ghost" onclick="showCompTests()">결과 목록 보기</button></div>`;
@@ -3978,20 +3986,61 @@ async function showCompTests(){
     html += `<div class="empty">등록된 결과가 없습니다.
       <br>검사 파이프라인이 연결되면 여기에 쌓입니다.</div>`;
   }else{
-    html += `<table><thead><tr><th>등록일</th><th>이름</th><th>생년월일</th>
-      <th>검사 종류</th><th>위험도</th><th>연결</th><th>해석지</th></tr></thead><tbody>`;
+    // 같은 사람의 같은 검사가 여러 번 올라온 건 눈에 띄게 표시합니다
+    const seen={};
     data.forEach(t=>{
-      html += `<tr><td>${fmtDate(t.created_at)}</td><td><b>${esc(t.client_name||'')}</b></td>
+      const k=(t.client_id||t.client_name||'')+'|'+(t.birth_date||'')+'|'+(t.test_type||'');
+      seen[k]=(seen[k]||0)+1;
+    });
+    html += `<table><thead><tr><th>등록일</th><th>이름</th><th>생년월일</th>
+      <th>검사 종류</th><th>위험도</th><th>연결</th><th>해석지</th>
+      ${canManage()?'<th></th>':''}</tr></thead><tbody>`;
+    data.forEach(t=>{
+      const k=(t.client_id||t.client_name||'')+'|'+(t.birth_date||'')+'|'+(t.test_type||'');
+      html += `<tr id="ctRow_${esc(t.id)}"><td>${fmtDate(t.created_at)}</td>
+        <td><b>${esc(t.client_name||'')}</b>${seen[k]>1
+          ? ` <span class="chip risk">중복 ${seen[k]}건</span>`:''}</td>
         <td>${esc(t.birth_date||'')}</td><td>${esc(t.test_type||'—')}</td>
         <td>${esc(t.risk_level||'—')}</td>
-        <td>${t.match_status==='matched'?'연결됨':'<span style="color:var(--warn)">대기</span>'}</td>
+        <td>${t.match_status==='matched'?'연결됨'
+             :t.match_status==='manual'?'직접 연결'
+             :'<span style="color:var(--warn)">대기</span>'}</td>
         <td>${t.pdf_url?`<a href="${esc(t.pdf_url)}" target="_blank" rel="noopener"
-          style="color:var(--accent);font-weight:600">열기</a>`:'—'}</td></tr>`;
+          style="color:var(--accent);font-weight:600">열기</a>`:'—'}</td>
+        ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
+          onclick="deleteCompTest('${t.id}', ${JSON.stringify(t.client_name||'')}, this)">지우기</button></td>`:''}
+        </tr>`;
     });
     html += `</tbody></table>`;
   }
   html += `<div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div></div>`;
   c.innerHTML=html;
+}
+
+/* 잘못 올렸거나 중복으로 올라온 종합심리검사 결과 하나를 지웁니다.
+   기록만 지우면 스토리지에 PDF가 남아 용량을 계속 차지하므로,
+   서버가 파일과 기록을 함께 지웁니다. 되돌릴 수 없어 한 번 더 확인을 구하고,
+   누가 무엇을 지웠는지는 수정 로그에 남습니다. */
+async function deleteCompTest(id, name, btn){
+  if(!canManage()){ toast('관리자만 지울 수 있습니다','bad'); return; }
+  const who = name ? `'${name}' 님의 ` : '';
+  if(!confirm(`${who}종합심리검사 결과를 지울까요?\n\n`
+    + `PDF 파일도 함께 지워집니다. 되돌릴 수 없습니다.`)) return;
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='지우는 중…'; }
+  try{
+    const res = await apiCall(`/api/comp-tests/${id}`, { method:'DELETE' });
+    const r = await res.json().catch(()=>({}));
+    toast(r.file_removed===false && r.file_note
+      ? `기록은 지웠지만 ${r.file_note}`
+      : '검사 결과를 지웠습니다');
+    const row = document.getElementById('ctRow_'+id) || document.getElementById('upRow_'+id);
+    if(row) row.remove();
+    else if(btn) btn.closest('tr')?.remove();
+  }catch(e){
+    toast(e.message,'bad');
+    if(btn){ btn.disabled=false; btn.textContent=old; }
+  }
 }
 async function showPending(){
   const c=$('content');
@@ -4028,33 +4077,94 @@ async function showPending(){
   c.innerHTML=html;
 }
 
-// '연결하기' — 종합심리검사 결과 하나를 명부의 실제 내담자와 사람이 직접 이어 줍니다.
-// 서버의 /api/comp-tests/:id/link 를 씁니다(관리자 권한 확인 + region_id 자동 채움까지 처리).
+/* '연결하기' — 종합심리검사 결과 하나를 명부의 실제 내담자와 사람이 직접 이어 줍니다.
+
+   파일 이름을 잘못 적어 올리는 일이 잦습니다(홍길동↔홍갈동, 08월01일↔08월04일,
+   통영↔사천 등). 그래서 창을 열면 서버가 명부에서 '비슷한 사람'을 찾아 순위대로
+   보여 줍니다. 다만 자동으로 잇지는 않습니다 — 검사 결과를 엉뚱한 사람에게 붙이면
+   되돌리기 어려우므로, 반드시 눈으로 확인하고 누르게 합니다.
+
+   연결하면 검사 기록의 이름·생년월일이 명부 값으로 바로잡힙니다(명부는 안 건드림).
+   저장되는 파일 이름도 명부 값에서 만들어지므로, 파일을 다시 올릴 필요가 없습니다. */
 function openPendingLink(testId, name, birth){
   S._linkPick = null;
+  S._linkTest = { id: testId, name, birth };
   const body = `
-    <div class="field"><label>이름으로 내담자 찾기</label>
-      <input type="text" id="linkSearch" value="${esc(name||'')}" placeholder="이름"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();runLinkSearch()}"></div>
-    <div class="actions" style="margin-top:0"><button class="btn ghost" type="button"
-      onclick="runLinkSearch()">찾기</button></div>
-    <div id="linkResults" style="margin-top:12px"></div>
-    <div id="linkPicked" class="hint" style="margin-top:8px"></div>`;
-  modal(`검사 연결 — ${esc(name||'이름 없음')} · ${esc(birth||'생년월일 없음')}`, body,
+    <div class="msg info" style="margin-top:0">
+      파일에서 읽은 값: <b>${esc(name||'이름 없음')}</b> · <b>${esc(birth||'생년월일 없음')}</b>
+      <br>명부에서 비슷한 사람을 찾아 아래에 보여 드립니다. 맞는 사람을 눌러 주세요.
+    </div>
+    <div id="linkCands" style="margin-top:12px"><div class="empty">비슷한 사람을 찾는 중…</div></div>
+    <details id="linkManual" style="margin-top:14px">
+      <summary style="cursor:pointer;color:var(--sub)">직접 이름으로 찾기</summary>
+      <div class="field" style="margin-top:10px"><label>이름</label>
+        <input type="text" id="linkSearch" placeholder="이름 일부만 적어도 됩니다"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();runLinkSearch()}"></div>
+      <div class="actions" style="margin-top:0"><button class="btn ghost" type="button"
+        onclick="runLinkSearch()">찾기</button></div>
+      <div id="linkResults" style="margin-top:10px"></div>
+    </details>
+    <div id="linkPicked" style="margin-top:12px"></div>`;
+  modal(`검사 연결 — ${esc(name||'이름 없음')}`, body,
     async ()=>{
       if(!S._linkPick){ toast('먼저 연결할 내담자를 골라 주세요','bad'); return false; }
       try{
-        await apiCall(`/api/comp-tests/${testId}/link`, {
+        const res = await apiCall(`/api/comp-tests/${testId}/link`, {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ client_id: S._linkPick.id }),
         });
-        toast(`${S._linkPick.name} 님과 연결했습니다`);
+        const r = await res.json().catch(()=>({}));
+        toast((r.fixed && r.fixed.length)
+          ? `${S._linkPick.name} 님과 연결하고 ${r.fixed.length}곳을 바로잡았습니다`
+          : `${S._linkPick.name} 님과 연결했습니다`);
         showPending();
         return true;
       }catch(e){ toast(e.message,'bad'); return false; }
     },
-    ()=>runLinkSearch());
+    ()=>loadLinkCandidates(testId));
 }
+
+// 서버에서 오타 후보를 받아 순위대로 그립니다.
+async function loadLinkCandidates(testId){
+  const box = $('linkCands');
+  if(!box) return;
+  try{
+    const res = await apiCall(`/api/comp-tests/${testId}/candidates`);
+    const r = await res.json();
+    const list = r.candidates || [];
+    if(!list.length){
+      box.innerHTML = `<div class="hint">명부에서 비슷한 사람을 찾지 못했습니다.
+        아래 '직접 이름으로 찾기'를 열어 찾아 주세요.</div>`;
+      const d=$('linkManual'); if(d) d.open = true;
+      return;
+    }
+    box.innerHTML = `<div class="hint" style="margin-bottom:6px">비슷한 사람 ${list.length}명 —
+      맞다고 확신할 때만 눌러 주세요.</div>`
+      + '<div class="results">' + list.map(c=>{
+        const strong = c.score >= 85;
+        return `<div onclick='pickLinkCandidate(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <b style="font-size:16px">${esc(c.name)}</b>
+            <span>${esc(c.birth_date||'생년월일 없음')}</span>
+            <span style="color:var(--sub)">${esc(c.region_name||'—')}</span>
+            ${c.status && c.status!=='재직'
+              ? `<span class="chip risk">${esc(c.status)}</span>` : ''}
+            <span class="chip${strong?'':' '}" style="margin-left:auto;${strong
+              ? 'background:var(--accent-soft);font-weight:700' : 'color:var(--sub)'}">${c.score}점</span>
+          </div>
+          <div style="font-size:13px;color:var(--sub);margin-top:3px">
+            ${esc((c.reasons||[]).join(' · '))}
+            ${[c.department,c.rank].filter(Boolean).length
+              ? ' · ' + esc([c.department,c.rank].filter(Boolean).join(' / ')) : ''}
+          </div>
+        </div>`;
+      }).join('') + '</div>';
+  }catch(e){
+    box.innerHTML = `<div class="msg bad">후보를 불러오지 못했습니다: ${esc(e.message)}</div>`;
+    const d=$('linkManual'); if(d) d.open = true;
+  }
+}
+
 async function runLinkSearch(){
   const q = $('linkSearch').value.trim();
   const box = $('linkResults');
@@ -4067,18 +4177,39 @@ async function runLinkSearch(){
     box.innerHTML = `<div class="hint">'${esc(q)}' 이름의 내담자가 없습니다.</div>`;
     return;
   }
-  box.innerHTML = '<div class="results">' + data.map(c=>
-    `<div onclick='pickLinkCandidate(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+  box.innerHTML = '<div class="results">' + data.map(c=>{
+    const flat = { id:c.id, name:c.name, birth_date:c.birth_date,
+      region_name: rname[c.region_id]||null, status:c.status,
+      department:c.extra?.department||null, rank:c.extra?.rank||null };
+    return `<div onclick='pickLinkCandidate(${JSON.stringify(flat).replace(/'/g,"&#39;")})'>
       <b>${esc(c.name)}</b> · ${esc(c.birth_date||'생년월일 없음')} · ${esc(rname[c.region_id]||'—')}
       ${[c.extra?.department,c.extra?.rank].filter(Boolean).length
         ? ' · '+esc([c.extra?.department,c.extra?.rank].filter(Boolean).join(' / ')) : ''}
-    </div>`).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 }
+
+// 고른 사람을 확인란에 보여 줍니다. 파일과 다른 점이 있으면 무엇이 바뀌는지 알려 줍니다.
 function pickLinkCandidate(c){
   S._linkPick = c;
   const box = $('linkPicked');
-  if(box) box.innerHTML = `<b>${esc(c.name)}</b>(${esc(c.birth_date||'생년월일 없음')}) 선택됨 —
-    저장을 누르면 이 검사와 연결됩니다.`;
+  if(!box) return;
+  const t = S._linkTest || {};
+  const fixes = [];
+  if((t.name||'').replace(/\s+/g,'') !== (c.name||'').replace(/\s+/g,'')){
+    fixes.push(`이름 <b>${esc(t.name||'없음')}</b> → <b>${esc(c.name)}</b>`);
+  }
+  if((t.birth||'') !== (c.birth_date||'')){
+    fixes.push(`생년월일 <b>${esc(t.birth||'없음')}</b> → <b>${esc(c.birth_date||'없음')}</b>`);
+  }
+  box.innerHTML = `<div class="msg ${fixes.length?'info':''}" style="margin:0">
+    <b>${esc(c.name)}</b> (${esc(c.birth_date||'생년월일 없음')}) 선택됨
+    ${fixes.length
+      ? `<br>저장하면 검사 기록이 이렇게 바로잡힙니다: ${fixes.join(', ')}
+         <br><span style="color:var(--sub);font-size:13px">명부는 바뀌지 않습니다.
+         파일 이름도 명부 값으로 다시 만들어지므로 파일을 새로 올릴 필요가 없습니다.</span>`
+      : '<br>파일에서 읽은 값과 명부가 같습니다.'}
+  </div>`;
 }
 
 /* ═══════════════════════════════════════════════════
