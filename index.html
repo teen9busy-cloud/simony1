@@ -452,7 +452,9 @@ const S = {                    // 앱 상태
 /* 화면에 지금 어떤 파일이 떠 있는지 표시합니다.
    파일을 덮어써도 열려 있던 탭은 갱신되지 않으므로, 이 값이 다르면
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
-const APP_VERSION = '2026-08-20 teamcol';
+// 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
+// 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
+const APP_VERSION = '2026-08-25 해석지';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -2792,7 +2794,8 @@ async function uploadPdfs(files){
               · ${fmtDate(x.duplicate.last_at)}</span>`:''}
             ${x.ai_error?`<br><span class="hint" style="color:var(--warn)">AI 분석 실패: ${esc(x.ai_error)}</span>`
               :(x.id && !x.ai_used)?`<br><span class="hint">AI가 내용을 읽지 못했습니다
-                (글자 ${x.text_chars??0}자)</span>`:''}</td>
+                (글자 ${x.text_chars??0}자)</span>`
+              :x.has_interp?`<br><span class="chip" style="margin-top:4px">해석지 생성됨</span>`:''}</td>
           <td style="white-space:nowrap">
             ${(x.id && x.status==='pending')?`<button class="btn" style="padding:6px 12px"
               onclick="openPendingLink('${x.id}','${jsq(x.name)}','${jsq(x.birth_date)}')">연결하기</button> `:''}
@@ -3939,8 +3942,13 @@ async function showClient(id){
       html += `<tr id="ctRow_${esc(t.id)}"><td>${fmtDate(t.created_at)}</td>
         <td>${esc(t.test_type||'—')}</td>
         <td>${esc(t.risk_level||'—')}</td>
-        <td>${t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
-          style="color:var(--accent);font-weight:600">결과지 열기</a>`:'—'}</td>
+        <td>${t.interpretation?`<a href="#" onclick="showInterpRow(${esc(JSON.stringify(
+              JSON.stringify({id:t.id,client_name:t.client_name,test_type:t.test_type,
+                birth_date:t.birth_date,created_at:t.created_at,
+                interpretation:t.interpretation,pdf_url:t.pdf_url})))});return false"
+            style="color:var(--accent);font-weight:600">해석지</a> · `:''}${
+          t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
+          style="color:var(--accent);font-weight:600">원본</a>`:'—'}</td>
         ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
           onclick="deleteCompTest('${t.id}','${jsq(t.client_name)}',this)">지우기</button></td>`:''}
         </tr>`;
@@ -4047,13 +4055,54 @@ function renderCompTests(){
         <td>${t.match_status==='matched'?'연결됨'
              :t.match_status==='manual'?'직접 연결'
              :'<span style="color:var(--warn)">대기</span>'}</td>
-        <td>${t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
-          style="color:var(--accent);font-weight:600">열기</a>`:'—'}</td>
+        <td>${t.interpretation?`<a href="#" onclick="showInterp('${t.id}');return false"
+            style="color:var(--accent);font-weight:600">해석지</a> · `:''}${
+          t.pdf_url?`<a href="#" onclick="openCompPdf('${t.id}');return false"
+          style="color:var(--accent);font-weight:600">원본</a>`:'—'}</td>
         ${canManage()?`<td><button class="btn ghost" style="padding:6px 12px"
           onclick="deleteCompTest('${t.id}','${jsq(t.client_name)}',this)">지우기</button></td>`:''}
         </tr>`;
     }).join('')
     + `</tbody></table></div>`;
+}
+
+/* 해석 요약지 보기.
+   제미나이가 결과지를 읽고 만든 글입니다 — 상담사가 초기 상담 전략을 세울 때 씁니다.
+   AI가 쓴 글이므로 T점수 같은 수치는 원본 결과지와 대조해 보시라고 알려 줍니다. */
+function showInterp(id){
+  const t = (S._compTests||[]).find(x=>x.id===id);
+  if(!t || !t.interpretation){ toast('해석지가 없습니다','bad'); return; }
+  const ov=document.createElement('div');
+  ov.className='overlay';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  ov.innerHTML=`<div class="modal" style="max-width:760px">
+    <h3>해석 요약지 — ${esc(t.client_name||'')}</h3>
+    <div class="desc">${esc(t.test_type||'검사종류 미상')} ·
+      ${esc(t.birth_date||'')} · 등록 ${fmtDate(t.created_at)}</div>
+    <div class="msg info" style="margin-top:10px">AI가 결과지를 읽고 쓴 글입니다.
+      상담 준비용 참고 자료이며, 수치나 판단은 원본 결과지와 함께 확인해 주세요.</div>
+    <div style="margin-top:12px;max-height:60vh;overflow:auto;white-space:pre-wrap;
+      line-height:1.75;font-size:15px;padding:14px;border:1px solid var(--line);
+      border-radius:var(--radius);background:var(--bg)">${esc(t.interpretation)}</div>
+    <div class="actions">
+      <button class="btn ghost" onclick="copyInterp('${t.id}')">글 복사</button>
+      ${t.pdf_url?`<button class="btn ghost" onclick="openCompPdf('${t.id}')">원본 결과지</button>`:''}
+      <button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+}
+async function copyInterp(id){
+  const t = (S._compTests||[]).find(x=>x.id===id) || S._interpOne;
+  if(!t) return;
+  try{ await navigator.clipboard.writeText(t.interpretation||''); toast('복사했습니다'); }
+  catch(e){ toast('복사하지 못했습니다','bad'); }
+}
+// 목록을 들고 있지 않은 화면(내담자 상세 등)에서 검사 한 건을 바로 넘겨 받아 엽니다.
+function showInterpRow(json){
+  let t; try{ t = JSON.parse(json); }catch(e){ toast('해석지를 열지 못했습니다','bad'); return; }
+  S._interpOne = t;
+  S._compTests = [...(S._compTests||[]).filter(x=>x.id!==t.id), t];
+  showInterp(t.id);
 }
 
 /* 결과지 PDF 열기.
