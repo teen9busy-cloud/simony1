@@ -151,6 +151,13 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .qbtn span{font-size:15px;color:var(--sub)}
 .qbtn.alert{border-left-color:var(--warn)}
 .qbtn.alert b{color:var(--warn)}
+/* 아직 만들지 않은 화면 — 자리는 두되 흐리게 보여 줍니다 */
+.qbtn.soon{border-left-color:var(--line);background:transparent}
+.qbtn.soon b{color:var(--sub);font-weight:600}
+.qbtn.soon span{color:var(--sub)}
+.qbtn.soon:hover{background:var(--accent-soft);border-left-color:var(--line)}
+.qbtn .soon-tag{display:inline-block;margin-right:6px;font-size:12px;font-weight:600;
+  color:var(--sub);border:1px solid var(--line);border-radius:3px;padding:0 6px}
 
 /* 이메일 도메인 빠른 입력 */
 .domains{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -454,7 +461,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-08-25 해석지';
+const APP_VERSION = '2026-08-25 첫화면';
 
 /* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
    상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
@@ -3628,17 +3635,62 @@ async function renderHome(){
     ${card('고위험군', highRisk+'명', highRisk>0)}
   </div>`;
 
-  // 상담사는 검색과 '내 내담자 보기'(상단 메뉴)만으로 충분하므로, 관리자에게만
-  // 전체 현황을 보는 검사 관련 화면을 더 보여줍니다. 나머지 폼 작성은 상단 메뉴
-  // (스크리닝·집단상담·업무보고)와 내담자 상세 화면에서 합니다.
+  /* 첫 화면에서 갈 수 있는 곳들.
+
+     구버전(0.5) 대시보드에 있던 메뉴를 성격별로 다시 묶었습니다. 상단 메뉴로도
+     갈 수 있는 것이 있지만, 구버전을 쓰던 분들이 첫 화면만 보고도 무엇을 할 수
+     있는지 알 수 있도록 여기에도 둡니다. 아직 만들지 않은 화면은 감추지 않고
+     '준비 중'으로 자리를 남겨 둡니다. */
+
+  // ── 자주 쓰는 것 (상담사·관리자 모두)
+  html += `<div class="eyebrow">자주 쓰는 것</div><div class="quick">`;
+  html += qbtn('내 내담자 보기','내가 맡은 사람 목록',"openTab('myclients')");
+  ['스크리닝','집단상담','업무보고'].forEach(t=>{
+    if(S.forms.some(f=>f.title===t))
+      html += qbtn(t+' 작성','새로 기록하기',`openFormByTitle('${t}')`);
+  });
+  html += `</div>`;
+
+  // ── 목록 보기 (상담사·관리자 모두 — 구버전과 같게)
+  html += `<div class="eyebrow">목록 보기</div><div class="quick">`;
+  ['집단상담','업무보고'].forEach(t=>{
+    if(S.forms.some(f=>f.title===t))
+      html += qbtn(t+(t==='업무보고'?' 내역':' 목록'),'지난 기록 훑어보기',
+                   `openListByTitle('${t}')`);
+  });
+  html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
+  html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
+  html += `</div>`;
+
+  // ── 검사
+  html += `<div class="eyebrow">검사</div><div class="quick">`;
+  html += qbtn('간이검사 실시','7문항 마음건강 검사','openSimpleTest()');
+  html += qbtn('고위험군 관리', highRisk>0?`확인 필요 ${highRisk}명`:'해당 없음',
+               'showHighRisk()', highRisk>0?'alert':'');
   if(canManage()){
-    html += `<div class="eyebrow">검사</div><div class="quick">`;
-    html += qbtn('간이검사 실시','7문항 마음건강 검사','openSimpleTest()');
-    html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
-    html += qbtn('고위험군 관리', highRisk>0?`확인 필요 ${highRisk}명`:'해당 없음',
-                 'showHighRisk()', highRisk>0?'alert':'');
-    html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
+    html += qbtn('검사 결과 올리기','종합심리검사 PDF',"openTab('admin:upload')");
     if(pending>0) html += qbtn('검사 연결 대기',`${pending}건 확인 필요`,'showPending()','alert');
+  }
+  html += `</div>`;
+
+  // ── 관리자 전용 (구버전의 '관리자 전용 메뉴'와 같은 자리)
+  if(canManage()){
+    html += `<div class="eyebrow">관리자 전용</div><div class="quick">`;
+    html += qbtn('통계','기간별 집계 보기',"openTab('stats')");
+    html += qsoon('리스트업 보드','제출용 명단',
+      '리스트업 보드는 준비 중입니다. 지금은 관리 → 전체 기록에서 엑셀로 내려받을 수 있습니다.');
+    html += qsoon('특수 상담 리스트','심층·긴급 상담 모아보기',
+      '특수 상담 리스트는 준비 중입니다. 지금은 기록 목록에서 폼별로 볼 수 있습니다.');
+    html += qsoon('신규 내담자 일괄등록','표로 한번에 등록',
+      '일괄등록은 준비 중입니다. 지금은 관리 → 내담자 DB에서 명부를 올릴 수 있습니다.');
+    html += qsoon('긴급심리지원 일괄등록','여러 명 한번에',
+      '일괄등록은 준비 중입니다. 지금은 한 명씩 기록해 주세요.');
+    html += `</div>`;
+
+    html += `<div class="eyebrow">다른 시스템</div><div class="quick">`;
+    EXTERNAL_APPS.forEach(([name, sub, url])=>{
+      html += qbtn(name, sub, `window.open('${url}','_blank','noopener')`);
+    });
     html += `</div>`;
   }
 
@@ -3673,6 +3725,33 @@ function soon(name){
 function qbtn(title, sub, onclick, kind){
   return `<button class="qbtn ${kind||''}" onclick="${onclick}">
     <b>${esc(title)}</b><span>${esc(sub)}</span></button>`;
+}
+/* 아직 만들지 않은 화면의 자리입니다.
+
+   구버전(0.5)에 있던 메뉴를 아예 감추면 상담사가 "기능이 없어졌다"고 오해합니다.
+   그래서 자리는 그대로 두고 흐리게 보여 주며, 누르면 무엇이 준비 중인지 알려 줍니다.
+   나중에 화면을 만들면 이 자리를 그대로 바꿔 끼우면 됩니다. */
+function qsoon(title, sub, note){
+  return `<button class="qbtn soon" onclick="toast(${JSON.stringify(note||(title+' 화면은 준비 중입니다'))})">
+    <b>${esc(title)}</b>
+    <span><span class="soon-tag">준비 중</span>${esc(sub)}</span></button>`;
+}
+// 구버전에서 쓰던 별도 시스템 세 개 — 주소만 걸어 새 탭으로 엽니다.
+const EXTERNAL_APPS = [
+  ['세보니', '통합과업', 'https://script.google.com/macros/s/AKfycbwCoxjRIApXUaPPvv6o4yRPR8KyH8rItEvKBGUMPIA_P0ZR_VMLqMDk9pbbKVo4Fbj5ZQ/exec'],
+  ['내보니', '만족도 조사', 'https://script.google.com/macros/s/AKfycbyu3ZI-5M8-OeUDtVkSK1utQWmaC_c7QmfUlsS69TK-Yqj16GzIM4GofM6k2FOPwHnhUg/exec'],
+  ['노무관리', '근무·노무 관리', 'https://script.google.com/macros/s/AKfycbyH9psnytqAQTmxsNSg_cIhEeYYKlPpTa-NXg56IxG5Kqcuv72Rxk_2HZi1aaSL_TlI/exec'],
+];
+// 상단 메뉴에 있는 폼 화면으로 바로 갑니다 (제목으로 찾습니다).
+function openFormByTitle(title){
+  const f = S.forms.find(x => x.title === title);
+  if(!f){ toast(`'${title}' 폼을 찾지 못했습니다`, 'bad'); return; }
+  openTab('form:' + f.id);
+}
+function openListByTitle(title){
+  const f = S.forms.find(x => x.title === title);
+  if(!f){ toast(`'${title}' 폼을 찾지 못했습니다`, 'bad'); return; }
+  openTab('list:' + f.id);
 }
 function card(label, value, warn){
   return `<div class="card${warn?' warn':''}">
