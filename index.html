@@ -482,12 +482,26 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-08-25 첫화면';
+const APP_VERSION = '2026-08-26 사진';
 
-/* 상단 메뉴에 둘 폼(제목 기준, 이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
-   상담사가 매일 쓰는 화면만 위에 남겨 두기 위한 것으로, forms 표의 실제 제목과
-   여기 적힌 글자가 같아야 매칭됩니다. 관리자가 폼 이름을 바꾸면 이 목록도 같이 고쳐야 합니다. */
-const TOP_NAV_FORMS = ['스크리닝','집단상담','업무보고'];
+/* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
+
+   제목을 글자 그대로 맞추지 않고 '들어 있는 낱말'로 찾습니다. 그래야 관리자가
+   폼 이름을 '업무보고'에서 '간담회·교육'처럼 바꿔도 메뉴에서 사라지지 않습니다.
+   화면에 보이는 이름은 언제나 폼에 저장된 실제 제목을 그대로 씁니다. */
+const TOP_NAV_FORMS = [
+  { key:'screening', words:['스크리닝'] },
+  { key:'group',     words:['집단상담','집단'] },
+  { key:'task',      words:['업무보고','간담회','교육','업무'] },
+];
+// 낱말 목록으로 폼 하나를 찾습니다. 앞에 적은 낱말일수록 먼저 맞춰 봅니다.
+function findForm(words){
+  for(const w of words){
+    const f = (S.forms||[]).find(x => String(x.title||'').includes(w));
+    if(f) return f;
+  }
+  return null;
+}
 
 /* 내담자 상세 화면에 보여줄 폼과 순서 (마찬가지로 제목으로 매칭) */
 const CLIENT_FORM_ORDER = ['스크리닝','심층상담','생애주기 상담','긴급심리지원','긴급콜','대형재난 출동'];
@@ -802,8 +816,8 @@ function renderTabs(){
      <button data-tab="myclients" onclick="openTab('myclients')">내 내담자 보기</button>`);
   // 상담사가 매일 쓰는 화면만 상단에 둡니다. 그 외 폼(심층상담·생애주기 상담·
   // 긴급심리지원·긴급콜·대형재난 출동)은 내담자 상세 화면에서 작성합니다.
-  TOP_NAV_FORMS.forEach(title=>{
-    const f = S.forms.find(x=>x.title===title);
+  TOP_NAV_FORMS.forEach(({words})=>{
+    const f = findForm(words);
     if(!f) return;
     t.insertAdjacentHTML('beforeend',
       `<button data-tab="form:${f.id}" onclick="openTab('form:${f.id}')">${esc(f.title)}</button>`);
@@ -3848,20 +3862,21 @@ async function renderHome(){
      '준비 중'으로 자리를 남겨 둡니다. */
 
   // ── 자주 쓰는 것 (상담사·관리자 모두)
+  // 폼 이름은 저장된 실제 제목을 그대로 씁니다. 관리자가 이름을 바꾸면 버튼 글자도 따라 바뀝니다.
   html += `<div class="eyebrow">자주 쓰는 것</div><div class="quick">`;
   html += qbtn('내 내담자 보기','내가 맡은 사람 목록',"openTab('myclients')");
-  ['스크리닝','집단상담','업무보고'].forEach(t=>{
-    if(S.forms.some(f=>f.title===t))
-      html += qbtn(t+' 작성','새로 기록하기',`openFormByTitle('${t}')`);
+  TOP_NAV_FORMS.forEach(({words})=>{
+    const f = findForm(words);
+    if(f) html += qbtn(f.title+' 작성','새로 기록하기',`openTab('form:${f.id}')`);
   });
   html += `</div>`;
 
   // ── 목록 보기 (상담사·관리자 모두 — 구버전과 같게)
   html += `<div class="eyebrow">목록 보기</div><div class="quick">`;
-  ['집단상담','업무보고'].forEach(t=>{
-    if(S.forms.some(f=>f.title===t))
-      html += qbtn(t+(t==='업무보고'?' 내역':' 목록'),'지난 기록 훑어보기',
-                   `openListByTitle('${t}')`);
+  [['group','목록'],['task','내역']].forEach(([key,word])=>{
+    const spec = TOP_NAV_FORMS.find(x=>x.key===key);
+    const f = spec && findForm(spec.words);
+    if(f) html += qbtn(f.title+' '+word,'지난 기록 훑어보기',`openTab('list:${f.id}')`);
   });
   html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
   html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
@@ -3948,16 +3963,6 @@ const EXTERNAL_APPS = [
   ['노무관리', '근무·노무 관리', 'https://script.google.com/macros/s/AKfycbyH9psnytqAQTmxsNSg_cIhEeYYKlPpTa-NXg56IxG5Kqcuv72Rxk_2HZi1aaSL_TlI/exec'],
 ];
 // 상단 메뉴에 있는 폼 화면으로 바로 갑니다 (제목으로 찾습니다).
-function openFormByTitle(title){
-  const f = S.forms.find(x => x.title === title);
-  if(!f){ toast(`'${title}' 폼을 찾지 못했습니다`, 'bad'); return; }
-  openTab('form:' + f.id);
-}
-function openListByTitle(title){
-  const f = S.forms.find(x => x.title === title);
-  if(!f){ toast(`'${title}' 폼을 찾지 못했습니다`, 'bad'); return; }
-  openTab('list:' + f.id);
-}
 function card(label, value, warn){
   return `<div class="card${warn?' warn':''}">
     <div class="card-label">${esc(label)}</div>
