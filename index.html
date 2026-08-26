@@ -310,6 +310,27 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   border-style:solid;transform:scale(1.01)}
 .dropzone b{font-size:19px}
 .dropzone span{font-size:15.5px;color:var(--sub)}
+
+/* 사진·서명부 올리는 칸 (폼 항목 안에 들어가므로 드롭존보다 작게) */
+.filebox{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:4px;min-height:84px;padding:14px;text-align:center;cursor:pointer;
+  border:2px dashed var(--line);border-radius:var(--radius);background:#fafcfb;
+  transition:all .12s}
+.filebox:hover,.filebox.over{border-color:var(--accent);background:var(--accent-soft)}
+.filebox.over{border-style:solid}
+.filebox b{font-size:16px}
+.filebox span{font-size:14px;color:var(--sub)}
+.thumbs{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.thumb{position:relative;width:116px}
+.thumb img{width:116px;height:116px;object-fit:cover;display:block;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+.thumb .cap{font-size:12.5px;color:var(--sub);margin-top:3px;line-height:1.35;
+  word-break:break-all}
+.thumb .del{position:absolute;top:5px;right:5px;width:26px;height:26px;padding:0;
+  border-radius:50%;border:none;background:rgba(0,0,0,.62);color:#fff;
+  font-size:15px;line-height:26px;cursor:pointer}
+.thumb .del:hover{background:var(--warn)}
+.thumb.busy{opacity:.55}
 .other-input{margin-top:7px}
 
 /* 카드 */
@@ -993,8 +1014,25 @@ function renderField(f, regionId){
       break;
     }
     case 'file':
-      input = `<input type="text" id="${id}" placeholder="파일 주소(URL)">
-               <div class="hint">파일 업로드는 다음 버전에 연결됩니다. 지금은 주소를 붙여넣으세요.</div>`; break;
+      // 사진·서명부를 여러 장 올립니다. 올린 것은 아래에 작은 그림으로 쌓입니다.
+      {
+        const cap = maxPxFor(f.label);
+        const isSign = cap === SIGN_MAX_PX;
+        input = `<input type="hidden" id="${id}">
+        <div class="filebox" id="${id}_box"
+          ondragover="event.preventDefault();this.classList.add('over')"
+          ondragleave="this.classList.remove('over')"
+          ondrop="event.preventDefault();this.classList.remove('over');pickFiles('${id}', event.dataTransfer.files, ${cap})"
+          onclick="document.getElementById('${id}_in').click()">
+          <b>${isSign?'서명부':'사진'}를 끌어다 놓거나 눌러서 고르세요</b>
+          <span>여러 장을 한 번에 올릴 수 있습니다 · 올리면서 자동으로 용량을 줄입니다${
+            isSign?' (서명부는 글씨가 뭉개지지 않게 더 크게 남깁니다)':''}</span>
+        </div>
+        <input type="file" id="${id}_in" class="hidden" accept="image/*" multiple
+          onchange="pickFiles('${id}', this.files, ${cap}); this.value=''">
+        <div class="thumbs" id="${id}_thumbs"></div>`;
+      }
+      break;
     default:
       input = `<input type="text" id="${id}">`;
   }
@@ -1634,6 +1672,133 @@ function focusMissing(firstEl){
 
 // 화면에 그려진 입력칸 하나에서 지금 값을 읽어 온다. (id="fld_"+field_key 기준)
 // 새 기록 저장과 기존 기록 수정, 둘 다 여기서 값을 읽습니다.
+/* ═══════════════════════════════════════════════════
+   사진·서명부 올리기
+
+   원본 사진은 한 장에 3~8MB씩 되는데 보고서에 넣을 때는 그만한 화질이 필요
+   없습니다. 그래서 올리기 전에 브라우저에서 긴 변 1600px으로 줄이고 JPEG로
+   다시 저장합니다. 눈으로는 차이를 못 느끼면서 용량은 보통 10분의 1 아래로
+   떨어집니다. (구버전은 1200px·품질 70%였는데, 서명부 글씨가 뭉개진다는 점을
+   감안해 조금 키웠습니다.)
+
+   저장은 '어디에 넣었는지'(path)만 기록에 남기고, 볼 때마다 서버에서 잠깐
+   쓸 수 있는 주소를 받아 옵니다. 사진에 얼굴과 서명이 들어 있기 때문입니다.
+   ═══════════════════════════════════════════════════ */
+const PHOTO_MAX_PX = 1600;      // 긴 변 기준 (현장 사진)
+const SIGN_MAX_PX  = 2200;      // 서명부는 글씨와 서명이 뭉개지면 안 되므로 더 크게
+const PHOTO_QUALITY = 0.82;
+// 항목 이름에 '서명'이 들어가면 서명부로 보고 해상도를 더 줍니다.
+function maxPxFor(label){ return /서명/.test(String(label||'')) ? SIGN_MAX_PX : PHOTO_MAX_PX; }
+
+// 사진 한 장을 줄여서 다시 저장합니다. 사진이 아니면 원본 그대로 둡니다.
+function shrinkImage(file, maxPx){
+  const cap = maxPx || PHOTO_MAX_PX;
+  return new Promise(resolve=>{
+    if(!file.type.startsWith('image/')) return resolve(file);
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      URL.revokeObjectURL(url);
+      let { width:w, height:h } = img;
+      const scale = Math.min(1, cap / Math.max(w, h));
+      if(scale === 1 && file.size < 700*1024) return resolve(file);  // 이미 작으면 그대로
+      w = Math.round(w*scale); h = Math.round(h*scale);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+      cv.toBlob(blob=>{
+        if(!blob || blob.size >= file.size) return resolve(file);   // 더 커지면 원본
+        const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+        resolve(new File([blob], name, { type:'image/jpeg' }));
+      }, 'image/jpeg', PHOTO_QUALITY);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+// 지금까지 고른 사진 목록을 숨은 칸에 담아 둡니다 (기록을 저장할 때 함께 들어갑니다).
+function filesOf(id){
+  try{ return JSON.parse($(id)?.value || '[]'); }catch(e){ return []; }
+}
+function setFilesOf(id, list){
+  const el = $(id); if(el) el.value = JSON.stringify(list);
+  drawThumbs(id);
+}
+function drawThumbs(id){
+  const box = $(id+'_thumbs'); if(!box) return;
+  const list = filesOf(id);
+  box.innerHTML = list.map((f,i)=>`
+    <div class="thumb">
+      ${f.url ? `<img src="${esc(f.url)}" alt="${esc(f.name||'')}"
+                   onclick="window.open('${esc(f.url)}','_blank','noopener')">`
+              : `<img alt="${esc(f.name||'')}">`}
+      <button type="button" class="del" title="빼기"
+        onclick="removeFile('${id}', ${i})">×</button>
+      <div class="cap">${esc(f.name||'')}${f.kb?` · ${f.kb}KB`:''}</div>
+    </div>`).join('');
+}
+async function pickFiles(id, fileList, maxPx){
+  const files = [...(fileList||[])];
+  if(!files.length) return;
+  const box = $(id+'_box');
+  const before = box ? box.innerHTML : '';
+  if(box) box.innerHTML = `<b>올리는 중…</b><span>${files.length}장</span>`;
+  try{
+    const fd = new FormData();
+    let saved = 0, orig = 0;
+    for(const f of files){
+      const small = await shrinkImage(f, maxPx);
+      orig += f.size; saved += small.size;
+      fd.append('files', small, small.name);
+    }
+    fd.append('kind', 'report');
+    const res = await apiCall('/api/files/upload', { method:'POST', body:fd });
+    const r = await res.json();
+    const added = (r.files||[]).map(f=>({
+      path:f.path, name:f.name, url:f.url, kb:Math.round(f.size/1024),
+    }));
+    setFilesOf(id, [...filesOf(id), ...added]);
+    const pct = orig>0 ? Math.round((1-saved/orig)*100) : 0;
+    toast(pct>0 ? `${added.length}장 올렸습니다 (용량 ${pct}% 줄임)`
+                : `${added.length}장 올렸습니다`);
+  }catch(e){
+    toast('올리지 못했습니다: '+e.message, 'bad');
+  }finally{
+    if(box) box.innerHTML = before;
+  }
+}
+async function removeFile(id, i){
+  const list = filesOf(id);
+  const f = list[i];
+  if(!f) return;
+  if(!confirm(`'${f.name||'이 사진'}'을 뺄까요?`)) return;
+  list.splice(i,1);
+  setFilesOf(id, list);
+  // 스토리지에서도 지웁니다 (기록에 안 들어갈 파일을 남겨 두면 용량만 먹습니다)
+  try{
+    await apiCall('/api/files/delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ path:f.path }),
+    });
+  }catch(e){ /* 목록에서 뺐으면 충분합니다 */ }
+}
+// 저장된 사진들을 볼 수 있는 주소를 한 번에 받아 옵니다.
+async function signFiles(list){
+  const paths = list.map(f=>f.path).filter(Boolean);
+  if(!paths.length) return list;
+  try{
+    const res = await apiCall('/api/files/urls', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ paths }),
+    });
+    const { urls } = await res.json();
+    return list.map(f=>({ ...f, url: urls[f.path] || f.url || null }));
+  }catch(e){ return list; }
+}
+
 function readFieldValue(f){
   const el = $('fld_'+f.field_key);
   if(f.field_type==='multiselect'){
@@ -1641,6 +1806,11 @@ function readFieldValue(f){
     return v.length ? v : null;
   }
   if(f.field_type==='checkbox') return el ? el.checked : null;
+  if(f.field_type==='file'){
+    // 볼 때 쓰는 임시 주소(url)는 곧 만료되므로 저장하지 않습니다.
+    const list = filesOf('fld_'+f.field_key).map(({path,name,kb})=>({path,name,kb}));
+    return list.length ? list : null;
+  }
   if(f.field_type==='number') return (!el || el.value==='') ? null : Number(el.value);
   if(f.field_type==='select') return selectValue('fld_'+f.field_key);
   if(f.field_type==='timerange'){
@@ -1664,6 +1834,19 @@ function setFieldValue(f, v){
     return;
   }
   if(f.field_type==='checkbox'){ const el=$(id); if(el) el.checked=!!v; return; }
+  if(f.field_type==='file'){
+    // 예전 기록은 주소 한 줄만 들어 있을 수 있어 그것도 받아 줍니다.
+    const list = Array.isArray(v) ? v
+      : (typeof v==='string' && v.trim() ? [{ path:null, name:v, url:v }] : []);
+    const el=$(id); if(el) el.value = JSON.stringify(list);
+    drawThumbs(id);
+    signFiles(list).then(signed=>{
+      const e2=$(id); if(!e2) return;
+      e2.value = JSON.stringify(signed);
+      drawThumbs(id);
+    });
+    return;
+  }
   if(f.field_type==='timerange'){
     const m = String(v||'').match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
     if(m){
@@ -2300,9 +2483,19 @@ async function openRecordDetailByIndex(i){
   if(form?.links_client){
     rows += `<dt>내담자</dt><dd>${esc(r.client_name||'')} · ${esc(r.birth_date||'')} · ${esc(r.gender||'')} · ID ${esc(r.client_internal_id||'')}</dd>`;
   }
+  const photoSlots = [];   // 사진은 주소를 받아 온 뒤에 채웁니다
   for(const f of (fields||[])){
     const v = r.data?.[f.field_key];
     if(v===null||v===undefined||v==='') continue;
+    if(f.field_type==='file'){
+      const list = Array.isArray(v) ? v : [{ path:null, name:v, url:v }];
+      if(!list.length) continue;
+      const slot = 'ph_'+Math.random().toString(36).slice(2,9);
+      photoSlots.push({ slot, list });
+      rows += `<dt>${esc(f.label)}</dt>
+        <dd><div class="thumbs" id="${slot}"><span class="hint">${list.length}장 불러오는 중…</span></div></dd>`;
+      continue;
+    }
     rows += `<dt>${esc(f.label)}</dt><dd>${esc(Array.isArray(v)?v.join(', '):typeof v==='boolean'?(v?'예':'아니오'):v)}</dd>`;
   }
   const ov=document.createElement('div');
@@ -2318,6 +2511,18 @@ async function openRecordDetailByIndex(i){
     </div>
   </div>`;
   document.body.appendChild(ov);
+  // 사진은 볼 때마다 잠깐 쓸 주소를 새로 받아 옵니다
+  photoSlots.forEach(async ({slot, list})=>{
+    const signed = await signFiles(list);
+    const box = document.getElementById(slot);
+    if(!box) return;
+    box.innerHTML = signed.map(f=>
+      f.url ? `<div class="thumb"><img src="${esc(f.url)}" alt="${esc(f.name||'')}"
+                 onclick="window.open('${esc(f.url)}','_blank','noopener')">
+                 <div class="cap">${esc(f.name||'')}</div></div>`
+            : `<div class="thumb"><div class="cap">${esc(f.name||'사진')} (열 수 없음)</div></div>`
+    ).join('');
+  });
 }
 
 /* ── 상세소속 / 내담자 DB / 검사 업로드 / 수정 로그 ──
