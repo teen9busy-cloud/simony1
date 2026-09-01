@@ -93,6 +93,20 @@ nav.tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-we
 .hint{font-size:15px;color:var(--sub);margin-top:4px;line-height:1.55}
 .err{border-color:var(--warn) !important}
 
+/* 선택지가 적은 항목은 드롭다운 대신 버튼으로 펼쳐 보여 줍니다.
+   (드롭다운은 그대로 두고 숨깁니다. 값을 읽고 쓰는 코드는 그대로 씁니다.) */
+select.as-chips{display:none}
+.chips-pick{display:flex;flex-wrap:wrap;gap:8px}
+.chip-opt{padding:11px 15px;font-size:16.5px;font-weight:500;line-height:1.3;
+  border:1.5px solid var(--line);border-radius:var(--radius-sm);background:#fff;
+  color:var(--ink);text-align:left;transition:border-color .1s,background .1s}
+.chip-opt:hover{border-color:var(--accent);background:var(--accent-soft)}
+.chip-opt.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+select.as-chips.err ~ .chips-pick .chip-opt{border-color:var(--warn)}
+.prefill-note{display:inline-flex;align-items:center;gap:5px;margin-top:6px;
+  font-size:14.5px;color:var(--accent-dark);background:var(--accent-soft);
+  border-radius:20px;padding:3px 11px;font-weight:600}
+
 /* 버튼 */
 .btn{background:var(--accent);color:#fff;border:1px solid var(--accent);
   padding:12px 22px;border-radius:var(--radius-sm);font-weight:700;font-size:16.5px;
@@ -545,7 +559,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-01 디자인';
+const APP_VERSION = '2026-09-01 선택버튼';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -588,6 +602,15 @@ function saveConfig(){
 }
 function resetConfig(){
   localStorage.removeItem('sb_url'); localStorage.removeItem('sb_key'); location.reload();
+}
+/* 로그인 화면 아래에 '연결 설정 변경'을 띄웁니다.
+   파일에 주소·키를 심어 둔 경우(지금 배포본)에는 바꿀 것이 없으므로 띄우지 않습니다.
+   ※ 이 함수는 원래 호출만 있고 정의가 빠져 있었습니다. 그래서 로그인 화면이
+     그려지다 멈춰, 바로 뒤의 '아이디 기억하기'가 동작하지 않았습니다. */
+function showConfigLink(){
+  const box = $('cfgLink'); if(!box) return;
+  if(SUPABASE_URL && SUPABASE_KEY){ box.innerHTML=''; return; }
+  box.innerHTML = `<a href="#" onclick="resetConfig();return false">연결 설정 변경</a>`;
 }
 
 /* ── 유틸 ── */
@@ -842,6 +865,59 @@ function lookupOptions(source, regionId){
 }
 const OTHER = '기타(직접 입력)';
 
+/* ── 선택지를 버튼으로 펼치기 ───────────────────────────────────────
+   드롭다운은 한 번 눌러 열고 다시 눌러 고르는 두 동작이 듭니다.
+   선택지가 몇 개 안 되는 항목(상담 형태·경로 등)은 처음부터 다 보여 주고
+   한 번만 누르게 합니다. 구 시모니(0.5)가 하던 방식입니다.
+
+   '주요 스트레스원'처럼 목록이 긴 항목은 화면이 지저분해지므로 드롭다운을
+   그대로 둡니다. 기준은 CHIP_MAX 하나뿐입니다.
+
+   구현: <select>는 지우지 않고 숨겨 둡니다. 값을 읽고 쓰는 기존 코드
+   (selectValue·setSelectValue·refreshLookupFields·저장·수정)를 하나도
+   건드리지 않아도 되기 때문입니다. 버튼은 그 <select>의 값을 바꿀 뿐입니다. */
+const CHIP_MAX = 8;
+function chipListFor(f, regionId){
+  if(f.field_type !== 'select') return [];
+  const list = f.lookup_source ? lookupOptions(f.lookup_source, regionId) : (f.options||[]);
+  return (list.length && list.length <= CHIP_MAX) ? list : [];
+}
+// 드롭다운 하나에 붙일 버튼줄을 만듭니다.
+//   cls  : <select>에 붙일 class ('as-chips'면 드롭다운을 숨깁니다)
+//   html : 그 아래에 넣을 버튼줄
+// 버튼줄 자리는 늘 만들어 둡니다. 지역이 바뀌어 선택지 개수가 달라져도
+// (부서 5개 → 15개) 그 자리에서 켜고 끌 수 있게 하기 위해서입니다.
+function chipsFor(id, list, withOther){
+  const on = list.length > 0 && list.length <= CHIP_MAX;
+  const vals = on ? list.concat(withOther ? [OTHER] : []) : [];
+  return {
+    cls: on ? 'as-chips' : '',
+    html: `<div class="chips-pick" id="${id}_chips">${vals.map(o=>
+      `<button type="button" class="chip-opt"
+        onclick="pickChip('${id}','${jsq(o)}')">${esc(o)}</button>`).join('')}</div>`,
+  };
+}
+// 버튼을 누르면 숨은 드롭다운의 값을 바꿉니다. 같은 것을 다시 누르면 선택을 풉니다.
+function pickChip(id, v){
+  const sel = $(id); if(!sel) return;
+  sel.value = (sel.value === v) ? '' : v;
+  sel.classList.remove('err');
+  clearPrefillNote(id);
+  toggleOther(id);                 // 여기서 syncChips까지 함께 돌아갑니다
+  if(sel.value === OTHER) $(id+'_other')?.focus();
+}
+// 드롭다운의 지금 목록·값에 맞춰 버튼줄을 다시 그립니다.
+// (지역이 바뀌어 목록이 통째로 바뀌었을 때도 이 함수 하나로 맞춰집니다.)
+function syncChips(id){
+  const sel = $(id), row = $(id+'_chips');
+  if(!sel || !row) return;
+  // 선택지가 많아 드롭다운으로 돌아간 항목이면 버튼줄을 비워 둡니다
+  if(!sel.classList.contains('as-chips')){ row.innerHTML=''; return; }
+  row.innerHTML = [...sel.options].filter(o=>o.value!=='')
+    .map(o=>`<button type="button" class="chip-opt${o.value===sel.value?' on':''}"
+      onclick="pickChip('${id}','${jsq(o.value)}')">${esc(o.textContent)}</button>`).join('');
+}
+
 /* 지역 목록을 상위 → 그 하위 순서로 줄 세웁니다.
    그냥 나열하면 상위와 하위가 뒤섞여 어느 것이 상위인지 알 수 없습니다. */
 /* 지역을 나무 모양(윗지역 → 아랫지역)으로 늘어놓습니다.
@@ -1037,8 +1113,15 @@ async function renderForm(){
   html += `<div class="actions">
       <button class="btn" id="saveBtn" onclick="saveRecord()">저장</button>
       <button class="btn ghost" onclick="renderForm()">초기화</button>
-    </div></div>`;
+      <button class="btn ghost" onclick="togglePrefill()" style="margin-left:auto">
+        미리 고르기 ${prefillOn()?'끄기':'켜기'}</button>
+    </div>
+    <div class="hint">${prefillOn()
+      ? '자주 쓰시는 값과 기본값을 미리 골라 둡니다. 미리 고른 자리에는 딱지가 붙습니다. 위험도·문제유형처럼 판단이 들어가는 항목은 미리 고르지 않습니다.'
+      : '미리 고르기가 꺼져 있습니다. 모든 항목을 직접 고릅니다.'}</div></div>`;
   c.innerHTML = html;
+  watchPrefillEdits();
+  applyPrefill();
   if(isGroupForm()){
     if(S.client){ S.members=[S.client]; S.client=null; }
     renderMemberArea();
@@ -1055,7 +1138,10 @@ async function renderForm(){
 function renderField(f, regionId){
   const id = 'fld_'+f.field_key;
   const req = f.required ? '<span class="req">*</span>' : '';
-  const wide = ['textarea','multiselect'].includes(f.field_type) ? ' wide' : '';
+  // 버튼으로 펼치는 항목은 옆으로 넓게 써야 한 줄에 여러 개가 들어갑니다.
+  const chipsWide = f.field_type==='select'
+    && chipListFor(f, regionId).length > 3;
+  const wide = (['textarea','multiselect'].includes(f.field_type) || chipsWide) ? ' wide' : '';
   let input='';
 
   // 자동 계산 항목 (생년월일 → 연령대)
@@ -1095,9 +1181,12 @@ function renderField(f, regionId){
       // 목록에 이미 '기타'류가 있으면 따로 붙이지 않습니다.
       // 그러지 않으면 '기타'와 '기타(직접 입력)'이 나란히 떠서 헷갈립니다.
       const other = needOther(f, list) ? `<option value="${OTHER}">${OTHER}</option>` : '';
+      // 선택지가 적으면 드롭다운을 숨기고 버튼으로 펼칩니다 (CHIP_MAX 참고).
+      const ch = chipsFor(id, list, !!other);
       input = `<select id="${id}" ${dynamic?`data-lookup="${f.lookup_source}"`:''}
-          onchange="toggleOther('${id}')">
+          class="${ch.cls}" onchange="toggleOther('${id}')">
           <option value="">— 선택 —</option>${opts}${other}</select>
+        ${ch.html}
         <input type="text" id="${id}_other" class="other-input hidden"
           placeholder="${esc(f.label)}을(를) 직접 입력">`;
       if(dynamic && !list.length){
@@ -1203,8 +1292,10 @@ function recalcDuration(){
 
 // '기타(직접 입력)'을 고르면 옆에 텍스트칸이 열린다
 function toggleOther(id){
-  const sel=$(id), other=$(id+'_other');
-  if(!sel||!other) return;
+  const sel=$(id); if(!sel) return;
+  syncChips(id);   // 버튼으로 펼친 항목이면 눌린 자리를 먼저 맞춥니다
+  const other=$(id+'_other');
+  if(!other) return;              // '기타' 칸이 없는 항목도 있습니다
   const on = sel.value===OTHER;
   other.classList.toggle('hidden', !on);
   if(!on){ other.value=''; other.classList.remove('err'); }
@@ -1245,7 +1336,12 @@ function refreshLookupFields(){
     // 이전 값이 새 목록에도 있으면 유지
     if(prev && (list.includes(prev) || (withOther && prev===OTHER))) sel.value = prev;
     else { sel.value=''; }
-    toggleOther(sel.id);   // 직접 입력칸 상태를 선택값에 맞춰 정리
+    // 지역이 바뀌면 선택지 개수도 바뀝니다. 적으면 버튼, 많으면 드롭다운으로 돌아갑니다.
+    const asChips = list.length > 0 && list.length <= CHIP_MAX;
+    sel.classList.toggle('as-chips', asChips);
+    const row = $(sel.id+'_chips');
+    if(row && !asChips) row.innerHTML = '';
+    toggleOther(sel.id);   // 직접 입력칸 상태를 선택값에 맞춰 정리 (+버튼줄 갱신)
   });
 }
 
@@ -1257,6 +1353,115 @@ function applyAutoFill(){
     if(!el) continue;
     const g = S.client?.birth_date ? ageGroupFromBirth(S.client.birth_date) : null;
     el.value = g || '';
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   미리 골라 두기
+
+   같은 값을 매번 다시 고르는 수고를 덜기 위한 것입니다. 두 가지가 함께 돕니다.
+
+     1) 기본값   — 관리자가 항목마다 '처음부터 골라 둘 값'을 정해 둡니다.
+                  모두에게 똑같이 적용됩니다. (구 시모니의 checked 와 같습니다)
+     2) 자주 쓰는 값 — 그 상담사가 최근에 쓴 자기 기록을 보고, 거의 늘 같은 값을
+                  고르는 항목이면 그 값을 미리 골라 둡니다. 사람마다 다릅니다.
+
+   반드시 지키는 선
+     · 위험도·자살·문제유형처럼 임상 판단이 들어가는 항목은 절대 건드리지 않습니다.
+       무심코 저장돼 기록이 틀어지면 되돌릴 수 없기 때문입니다.
+     · 미리 고른 자리에는 '미리 고름' 딱지를 붙여, 눈에 띄게 해 둡니다.
+     · 상담사가 원하면 통째로 끌 수 있습니다.
+   ═══════════════════════════════════════════════════ */
+const PREFILL_OFF_KEY = 'sb_prefill_off';
+function prefillOn(){ return localStorage.getItem(PREFILL_OFF_KEY) !== '1'; }
+function togglePrefill(){
+  localStorage.setItem(PREFILL_OFF_KEY, prefillOn() ? '1' : '0');
+  toast(prefillOn() ? '미리 고르기를 켰습니다' : '미리 고르기를 껐습니다');
+  renderForm();
+}
+// 임상 판단이 들어가는 항목 — 여기 걸리면 어떤 경우에도 미리 고르지 않습니다.
+const NO_PREFILL_WORDS = ['위험','자살','자해','문제유형','문제 유형','진단','소견',
+  '판단','심각','응급','긴급','척도','점수','증상','호소','평가','조치','의뢰','종결'];
+function isClinicalField(f){
+  const t = `${f.label||''} ${f.field_key||''}`;
+  return NO_PREFILL_WORDS.some(w=>t.includes(w))
+      || /risk|suicid|problem|diagnos/i.test(f.field_key||'');
+}
+// 미리 골라도 되는 항목인가
+function mayPrefill(f){
+  if(isClinicalField(f)) return false;
+  if(isGroupForm() && isPersonalField(f)) return false;   // 화면에 칸이 없습니다
+  if(f.auto_fill) return false;                           // 자동 계산 항목
+  return ['select','multiselect','checkbox'].includes(f.field_type);
+}
+// '미리 고름' 딱지
+function markPrefill(f, why){
+  const box = $('fld_'+f.field_key)?.closest('.field');
+  if(!box || box.querySelector('.prefill-note')) return;
+  const tag = document.createElement('div');
+  tag.className = 'prefill-note';
+  tag.textContent = why;
+  box.appendChild(tag);
+}
+function clearPrefillNote(id){
+  $(id)?.closest('.field')?.querySelector('.prefill-note')?.remove();
+}
+// 손으로 고른 순간 딱지를 떼기 위해, 항목 칸 전체에 한 번만 귀를 답니다.
+let _prefillWatchOn = false;
+function watchPrefillEdits(){
+  if(_prefillWatchOn) return;          // 폼을 다시 그릴 때마다 겹쳐 달리지 않게 한 번만
+  _prefillWatchOn = true;
+  document.addEventListener('change', e=>{
+    e.target?.closest?.('.field')?.querySelector('.prefill-note')?.remove();
+  });
+}
+
+async function applyPrefill(){
+  if(!prefillOn()) return;
+
+  // ── 1) 관리자가 정해 둔 기본값
+  for(const f of S.fields){
+    if(!mayPrefill(f) || !f.default_value) continue;
+    if(readFieldValue(f)) continue;             // 이미 채워져 있으면 두고 봅니다
+    // 예/아니오 항목은 «예»일 때만 손댑니다. '아니오'는 원래 상태라 표시할 것이 없습니다.
+    if(f.field_type==='checkbox'
+       && !['예','y','true','1'].includes(String(f.default_value).trim().toLowerCase())) continue;
+    const v = f.field_type==='multiselect'
+      ? String(f.default_value).split(',').map(s=>s.trim()).filter(Boolean)
+      : f.field_type==='checkbox' ? true
+      : f.default_value;
+    setFieldValue(f, v);
+    markPrefill(f, '기본값');
+  }
+
+  // ── 2) 그 상담사가 자주 쓰는 값
+  //     select 항목만 봅니다. 여러 개 고르는 항목은 조합이 매번 달라서
+  //     '자주 쓴다'고 말하기 어렵습니다.
+  const cand = S.fields.filter(f => mayPrefill(f) && f.field_type==='select'
+                                 && !f.lookup_source);
+  if(!cand.length || !S.me?.id) return;
+
+  const formId = S.form.id;
+  const { data: recs } = await sb.from('form_records')
+    .select('data')
+    .eq('form_id', formId).eq('author_id', S.me.id)
+    .order('created_at', { ascending:false }).limit(30);
+  // 기다리는 동안 다른 폼으로 옮겨 갔으면 손대지 않습니다
+  if(S.form?.id !== formId) return;
+  if(!recs || recs.length < 5) return;          // 표본이 적으면 아직 판단하지 않습니다
+
+  for(const f of cand){
+    if(readFieldValue(f)) continue;             // 그새 채워졌으면 그대로 둡니다
+    const vals = recs.map(r => r.data?.[f.field_key])
+                     .filter(v => typeof v === 'string' && v);
+    if(vals.length < 5) continue;
+    const cnt = {};
+    vals.forEach(v => cnt[v] = (cnt[v]||0)+1);
+    const [top, n] = Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+    // 최근 기록의 3/4 이상에서 같은 값을 골랐을 때만 미리 고릅니다.
+    if(n / vals.length < 0.75) continue;
+    if(!setSelectValue('fld_'+f.field_key, top)) continue;
+    markPrefill(f, `자주 쓰시는 값 (최근 ${vals.length}건 중 ${n}건)`);
   }
 }
 
@@ -1640,10 +1845,12 @@ async function toggleNewClient(){
     if(d.lookup_source){
       const list = lookupOptions(d.lookup_source, region);
       const opts = list.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
-      return `<div class="field"><label>${esc(d.label)}${req}</label>
-        <select id="${id}" onchange="toggleOther('${id}')">
+      const ch = chipsFor(id, list, true);
+      return `<div class="field${list.length>3?' wide':''}"><label>${esc(d.label)}${req}</label>
+        <select id="${id}" class="${ch.cls}" onchange="toggleOther('${id}')">
           <option value="">— 선택 —</option>${opts}
           <option value="${OTHER}">${OTHER}</option></select>
+        ${ch.html}
         <input type="text" id="${id}_other" class="other-input hidden"
           placeholder="${esc(d.label)} 직접 입력">
         ${list.length?'':`<div class="hint" style="color:var(--warn)">
@@ -1651,9 +1858,12 @@ async function toggleNewClient(){
       </div>`;
     }
     if(d.field_type==='select'){
-      const o=(d.options||[]).map(x=>`<option>${esc(x)}</option>`).join('');
-      return `<div class="field"><label>${esc(d.label)}${req}</label>
-        <select id="${id}"><option value="">— 선택 —</option>${o}</select></div>`;
+      const list = d.options||[];
+      const o = list.map(x=>`<option>${esc(x)}</option>`).join('');
+      const ch = chipsFor(id, list, false);
+      return `<div class="field${list.length>3?' wide':''}"><label>${esc(d.label)}${req}</label>
+        <select id="${id}" class="${ch.cls}" onchange="toggleOther('${id}')">
+          <option value="">— 선택 —</option>${o}</select>${ch.html}</div>`;
     }
     return `<div class="field"><label>${esc(d.label)}${req}</label>
       <input type="${d.field_type==='number'?'number':d.field_type==='date'?'date':'text'}" id="${id}"></div>`;
@@ -1668,8 +1878,10 @@ async function toggleNewClient(){
       <div class="field"><label>생년월일<span class="req">*</span></label>
         ${birthInputHTML('nc_birth')}</div>
       <div class="field"><label>성별<span class="req">*</span></label>
-        <select id="nc_gender"><option value="">— 선택 —</option>
-          <option>남</option><option>여</option></select></div>
+        <select id="nc_gender" class="as-chips" onchange="toggleOther('nc_gender')">
+          <option value="">— 선택 —</option>
+          <option>남</option><option>여</option></select>
+        ${chipsFor('nc_gender', ['남','여'], false).html}</div>
       <div class="field"><label>개인식별아이디</label>
         <input type="text" id="nc_iid"></div>
       <div class="field"><label>디지털 식별번호</label>
@@ -3370,7 +3582,9 @@ async function renderFieldEditor(){
         <button class="btn ghost" style="padding:2px 6px" ${i===fields.length-1?'disabled':''}
           onclick="moveField(${i},1)">↓</button></td>
       <td><b>${esc(f.label)}</b>
-        ${(f.options||[]).length?`<div class="hint">선택지 ${f.options.length}개</div>`:''}</td>
+        ${(f.options||[]).length?`<div class="hint">선택지 ${f.options.length}개${
+          f.options.length<=CHIP_MAX?' · 버튼으로 펼침':''}</div>`:''}
+        ${f.default_value?`<div class="hint">기본값 «${esc(f.default_value)}»</div>`:''}</td>
       <td>${typeLabel(f.field_type)}</td>
       <td>${esc(f.section||'—')}</td>
       <td>${f.required?'필수':'—'}</td>
@@ -3458,7 +3672,15 @@ function editField(id){
           <option value="false" ${f&&!f.is_active?'selected':''}>중지</option></select></div>
       <div class="field wide" id="optBox">
         <label>선택지 (한 줄에 하나)</label>
-        <textarea id="m_opts">${esc((f?.options||[]).join('\n'))}</textarea></div>
+        <textarea id="m_opts">${esc((f?.options||[]).join('\n'))}</textarea>
+        <div class="hint">선택지가 ${CHIP_MAX}개 이하이면 드롭다운 대신 버튼으로 펼쳐 보여 줍니다.</div></div>
+      <div class="field wide" id="defBox">
+        <label>처음부터 골라 둘 값 (기본값)</label>
+        <input type="text" id="m_def" value="${esc(f?.default_value||'')}"
+          placeholder="예: 대면상담 — 비워 두면 아무것도 미리 고르지 않습니다">
+        <div class="hint">선택지에 있는 말과 똑같이 적어야 합니다.
+          여러 개 고르는 항목은 쉼표(,)로 나눠 적고, 예/아니오 항목은 «예»라고 적습니다.
+          위험도·문제유형처럼 판단이 들어가는 항목에는 적어도 적용되지 않습니다.</div></div>
     </div>`,
     async ()=>{
       const label=$('m_label').value.trim();
@@ -3480,7 +3702,13 @@ function editField(id){
         stats_enabled:$('m_stats').value==='true',
         is_active:$('m_fa').value==='true',
         options: needOpts ? opts : null,
+        default_value: $('m_def').value.trim() || null,
       };
+      // 기본값이 선택지에 없으면 영영 적용되지 않습니다. 미리 알려 줍니다.
+      if(row.default_value && type==='select' && opts.length && !opts.includes(row.default_value)){
+        toast(`'${row.default_value}'은(는) 선택지에 없는 말입니다. 선택지와 똑같이 적어 주세요.`,'bad');
+        return false;
+      }
       let error;
       if(f){ ({ error } = await sb.from('form_fields').update(row).eq('id', f.id)); }
       else{
@@ -3496,8 +3724,10 @@ function editField(id){
 }
 function toggleOptBox(){
   const t=$('m_type')?.value;
-  const box=$('optBox'); if(!box) return;
-  box.style.display = ['select','multiselect'].includes(t) ? '' : 'none';
+  const box=$('optBox');
+  if(box) box.style.display = ['select','multiselect'].includes(t) ? '' : 'none';
+  const dbox=$('defBox');
+  if(dbox) dbox.style.display = ['select','multiselect','checkbox'].includes(t) ? '' : 'none';
 }
 
 /* ── 지역 ── */
