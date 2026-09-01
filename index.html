@@ -482,7 +482,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-08-26 항목정리';
+const APP_VERSION = '2026-08-31 게시판';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -822,6 +822,9 @@ function renderTabs(){
     t.insertAdjacentHTML('beforeend',
       `<button data-tab="form:${f.id}" onclick="openTab('form:${f.id}')">${esc(f.title)}</button>`);
   });
+  // 게시판은 상담사도 씁니다 (읽고 답글 달기). 그래서 폼 옆에 둡니다.
+  t.insertAdjacentHTML('beforeend',
+    `<button data-tab="board" onclick="openTab('board')">게시판</button>`);
   if(canManage()){
     t.insertAdjacentHTML('beforeend',
       `<button data-tab="list" onclick="openTab('list')">기록 목록</button>
@@ -868,10 +871,12 @@ function showTab(tab){
   document.querySelectorAll('#tabs button').forEach(b=>
     b.classList.toggle('on', b.dataset.tab===tab
       || (tab.startsWith('admin:') && b.dataset.tab==='admin:forms')
-      || (tab.startsWith('list') && b.dataset.tab==='list')));
+      || (tab.startsWith('list') && b.dataset.tab==='list')
+      || (tab.startsWith('board') && b.dataset.tab==='board')));
   const [mode,id] = tab.split(':');
   if(mode==='home'){ renderHome(); return; }
   if(mode==='myclients'){ showMyClients(); return; }
+  if(mode==='board'){ renderBoard(id); return; }   // id가 있으면 그 글을 폅니다
   if(mode==='stats'){ renderStats(); return; }
   if(mode==='admin'){ renderAdmin(id); return; }
   if(mode==='list'){
@@ -4675,6 +4680,276 @@ function pickLinkCandidate(c){
          파일 이름도 명부 값으로 다시 만들어지므로 파일을 새로 올릴 필요가 없습니다.</span>`
       : '<br>파일에서 읽은 값과 명부가 같습니다.'}
   </div>`;
+}
+
+/* ═══════════════════════════════════════════════════
+   게시판
+
+   글은 관리자가 쓰고, 상담사는 답글을 답니다. 지역별로 나뉘어서
+   자기가 볼 수 있는 지역의 글만 보입니다.
+
+   첨부파일은 '읽는 권한'과 '여는 권한'이 다릅니다.
+   답글 글자는 상담사끼리 서로 읽지만, 다른 상담사가 답글에 붙인 파일은
+   열 수 없습니다. 그 판단은 서버가 합니다(/api/board/file).
+   ═══════════════════════════════════════════════════ */
+const BOARD_MAX_MB = 3;
+
+async function renderBoard(postId){
+  if(postId) return showPost(postId);
+  const c=$('content');
+  c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
+
+  const { data, error } = await sb.from('board_posts').select('*')
+    .order('is_pinned',{ascending:false}).order('created_at',{ascending:false}).limit(300);
+  if(error){ c.innerHTML=`<div class="panel"><div class="msg bad">${esc(error.message)}</div></div>`; return; }
+  S._posts = data||[];
+
+  // 답글 수를 한 번에 세어 옵니다 (글마다 따로 묻지 않기 위해)
+  const counts={};
+  if(S._posts.length){
+    const { data: reps } = await sb.from('board_replies')
+      .select('post_id').in('post_id', S._posts.map(p=>p.id));
+    (reps||[]).forEach(r=>{ counts[r.post_id]=(counts[r.post_id]||0)+1; });
+  }
+  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
+
+  let html = `<div class="panel">
+    <h2>게시판</h2>
+    <div class="desc">${canManage()
+      ? '공지와 자료를 올립니다. 상담사는 읽고 답글을 답니다.'
+      : '관리자가 올린 공지입니다. 궁금한 점은 답글로 남겨 주세요.'}</div>
+    ${canManage()?`<div class="actions"><button class="btn" onclick="editPost(null)">새 글 쓰기</button></div>`:''}`;
+
+  if(!S._posts.length){
+    html += `<div class="empty">아직 올라온 글이 없습니다.</div></div>`;
+    c.innerHTML=html; return;
+  }
+  html += `<div style="overflow:auto"><table><thead><tr>
+    <th style="width:74px"></th><th>제목</th><th>지역</th><th>올린 사람</th><th>날짜</th>
+    </tr></thead><tbody>`;
+  S._posts.forEach(p=>{
+    const n = counts[p.id]||0;
+    html += `<tr style="cursor:pointer" onclick="openTab('board:${p.id}')">
+      <td style="white-space:nowrap">${p.is_pinned?'<span class="chip">고정</span>':''}</td>
+      <td><b>${esc(p.title)}</b>
+        ${n?` <span class="hint">답글 ${n}</span>`:''}
+        ${(p.files||[]).length?` <span class="hint">첨부 ${p.files.length}</span>`:''}</td>
+      <td>${esc(rname[p.region_id]||'—')}</td>
+      <td>${esc(p.author_name||'')}</td>
+      <td>${fmtDate(p.created_at)}</td></tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+  c.innerHTML=html;
+}
+
+/* 글 한 편과 답글들 */
+async function showPost(id){
+  const c=$('content');
+  c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
+  const { data: p, error } = await sb.from('board_posts').select('*').eq('id',id).maybeSingle();
+  if(error || !p){ c.innerHTML=`<div class="panel"><div class="msg bad">글을 찾지 못했습니다.</div>
+    <div class="actions"><button class="btn ghost" onclick="openTab('board')">목록으로</button></div></div>`; return; }
+  const { data: reps } = await sb.from('board_replies').select('*')
+    .eq('post_id', id).order('created_at');
+  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
+  const mine = u => u && S.me && u===S.me.id;
+
+  c.innerHTML = `<div class="panel">
+    <h2>${p.is_pinned?'<span class="chip">고정</span> ':''}${esc(p.title)}</h2>
+    <div class="desc">${esc(rname[p.region_id]||'')} · ${esc(p.author_name||'')} ·
+      ${fmtDate(p.created_at)}${p.updated_at?' (고침)':''}</div>
+    <div style="white-space:pre-wrap;line-height:1.75;margin-top:14px">${esc(p.body||'')}</div>
+    ${fileListHTML(p.files, id, '첨부')}
+    ${canManage()?`<div class="actions">
+      <button class="btn ghost" onclick="editPost('${p.id}')">고치기</button>
+      <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
+        onclick="deletePost('${p.id}','${jsq(p.title)}')">지우기</button>
+      <button class="btn ghost" onclick="togglePin('${p.id}',${!p.is_pinned})">
+        ${p.is_pinned?'고정 풀기':'맨 위에 고정'}</button></div>`:''}
+  </div>
+
+  <div class="panel">
+    <h2>답글 ${ (reps||[]).length || '' }</h2>
+    ${!(reps||[]).length?'<div class="empty">아직 답글이 없습니다.</div>':''}
+    ${(reps||[]).map(r=>`
+      <div style="padding:14px 0;border-bottom:1px solid var(--line2)">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b>${esc(r.author_name||'')}</b>
+          <span class="hint">${fmtDate(r.created_at)}</span>
+          ${(mine(r.author_id)||canManage())?`<button class="btn ghost"
+            style="margin-left:auto;padding:4px 10px"
+            onclick="deleteReply('${r.id}','${p.id}')">지우기</button>`:''}
+        </div>
+        <div style="white-space:pre-wrap;line-height:1.7;margin-top:6px">${esc(r.body)}</div>
+        ${fileListHTML(r.files, p.id, '첨부', r.author_id)}
+      </div>`).join('')}
+
+    <div class="field" style="margin-top:16px"><label>답글 쓰기</label>
+      <textarea id="rep_body" rows="3" placeholder="궁금한 점이나 알릴 내용을 적어 주세요"></textarea></div>
+    ${boardFileBoxHTML('rep_files')}
+    <div class="actions">
+      <button class="btn" onclick="addReply('${p.id}')">답글 올리기</button>
+      <button class="btn ghost" onclick="openTab('board')">목록으로</button></div>
+  </div>`;
+}
+
+/* 첨부 목록. 파일을 여는 것은 서버가 권한을 따진 뒤에 됩니다. */
+function fileListHTML(files, postId, label, ownerId){
+  const list = Array.isArray(files) ? files : [];
+  if(!list.length) return '';
+  const blocked = ownerId!==undefined && !canManage() && ownerId !== S.me?.id;
+  return `<div style="margin-top:12px">
+    <div class="hint">${esc(label)} ${list.length}개${blocked
+      ? ' — 다른 분이 올린 파일이라 열 수 없습니다' : ''}</div>
+    <div class="thumbs">${list.map(f=>`
+      <div class="thumb" style="width:auto;min-width:150px;max-width:230px">
+        <div class="cap" style="margin:0">
+          ${blocked
+            ? `<span style="color:var(--sub)">🔒 ${esc(f.name||'파일')}</span>`
+            : `<a href="#" onclick="openBoardFile('${jsq(f.path)}','${postId}');return false"
+                 style="color:var(--accent);font-weight:600">${esc(f.name||'파일')}</a>`}
+          ${f.kb?`<span style="color:var(--sub)"> · ${f.kb}KB</span>`:''}
+        </div>
+      </div>`).join('')}</div></div>`;
+}
+async function openBoardFile(path, postId){
+  try{
+    const res = await apiCall('/api/board/file', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ path, post_id: postId }),
+    });
+    const r = await res.json();
+    if(!r.url) throw new Error('주소를 받지 못했습니다');
+    window.open(r.url, '_blank', 'noopener');
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+/* 첨부 고르는 칸 (글쓰기·답글 공용) */
+function boardFileBoxHTML(id){
+  return `<input type="hidden" id="${id}">
+    <div class="filebox" id="${id}_box"
+      ondragover="event.preventDefault();this.classList.add('over')"
+      ondragleave="this.classList.remove('over')"
+      ondrop="event.preventDefault();this.classList.remove('over');pickBoardFiles('${id}',event.dataTransfer.files)"
+      onclick="document.getElementById('${id}_in').click()">
+      <b>파일 붙이기</b>
+      <span>한 개 ${BOARD_MAX_MB}MB까지 · 사진과 PDF는 올리면서 용량을 줄입니다</span>
+    </div>
+    <input type="file" id="${id}_in" class="hidden" multiple
+      onchange="pickBoardFiles('${id}', this.files); this.value=''">
+    <div class="thumbs" id="${id}_thumbs"></div>`;
+}
+async function pickBoardFiles(id, fileList){
+  const files=[...(fileList||[])];
+  if(!files.length) return;
+  const box=$(id+'_box'); const before=box?box.innerHTML:'';
+  if(box) box.innerHTML=`<b>올리는 중…</b><span>${files.length}개</span>`;
+  try{
+    const fd=new FormData();
+    for(const f of files){
+      // 사진은 여기서 줄여 보냅니다. PDF는 서버가 줄입니다.
+      const small = f.type.startsWith('image/') ? await shrinkImage(f, 1600) : f;
+      if(small.size > BOARD_MAX_MB*1024*1024 && !/pdf$/i.test(small.name)){
+        toast(`'${small.name}'은(는) ${BOARD_MAX_MB}MB를 넘어 건너뜁니다`,'bad');
+        continue;
+      }
+      fd.append('files', small, small.name);
+    }
+    const res = await apiCall('/api/board/upload', { method:'POST', body:fd });
+    const r = await res.json();
+    const ok = (r.files||[]).filter(f=>!f.error);
+    (r.files||[]).filter(f=>f.error).forEach(f=>toast(`${f.name}: ${f.error}`,'bad'));
+    setBoardFiles(id, [...boardFiles(id), ...ok]);
+    if(ok.length){
+      const pct = Math.max(...ok.map(f=>f.saved_pct||0));
+      toast(pct>0 ? `${ok.length}개 붙였습니다 (최대 ${pct}% 줄임)` : `${ok.length}개 붙였습니다`);
+    }
+  }catch(e){ toast('올리지 못했습니다: '+e.message,'bad'); }
+  finally{ if(box) box.innerHTML=before; }
+}
+function boardFiles(id){ try{ return JSON.parse($(id)?.value||'[]'); }catch(e){ return []; } }
+function setBoardFiles(id, list){
+  const el=$(id); if(el) el.value=JSON.stringify(list);
+  const box=$(id+'_thumbs'); if(!box) return;
+  box.innerHTML = list.map((f,i)=>`
+    <div class="thumb" style="width:auto;min-width:150px;max-width:230px">
+      <div class="cap" style="margin:0">${esc(f.name||'파일')}${f.kb?` · ${f.kb}KB`:''}
+        <button type="button" class="btn ghost" style="padding:2px 8px;margin-left:6px"
+          onclick="removeBoardFile('${id}',${i})">빼기</button></div>
+    </div>`).join('');
+}
+function removeBoardFile(id,i){
+  const l=boardFiles(id); l.splice(i,1); setBoardFiles(id,l);
+}
+
+/* 글 쓰기·고치기 (관리자만) */
+function editPost(id){
+  if(!canManage()){ toast('관리자만 글을 쓸 수 있습니다','bad'); return; }
+  const p = id ? (S._posts||[]).find(x=>x.id===id) : null;
+  const body = `
+    <div class="field"><label>제목 <span class="req">*</span></label>
+      <input type="text" id="p_title" value="${esc(p?.title||'')}"></div>
+    <div class="field"><label>지역 <span class="req">*</span></label>
+      <select id="p_region">${p?'':'<option value="">— 지역 선택 —</option>'}${
+        regionOptionsHTML(p?.region_id||'', { plain:true })}</select>
+      <div class="hint">고른 지역의 상담사에게만 보입니다</div></div>
+    <div class="field"><label>내용</label>
+      <textarea id="p_body" rows="8">${esc(p?.body||'')}</textarea></div>
+    <label class="hint" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="p_pin" ${p?.is_pinned?'checked':''}> 맨 위에 고정</label>
+    ${boardFileBoxHTML('p_files')}`;
+  modal(id?'글 고치기':'새 글 쓰기', body, async ()=>{
+    const title=$('p_title').value.trim();
+    if(!title){ toast('제목을 적어 주세요','bad'); return false; }
+    const region=selectValue('p_region');
+    if(!region){ toast('지역을 골라 주세요','bad'); return false; }
+    const row = {
+      title, region_id: region, body: $('p_body').value.trim()||null,
+      is_pinned: $('p_pin').checked, files: boardFiles('p_files'),
+    };
+    let error;
+    if(p){
+      row.updated_at = new Date().toISOString();
+      ({ error } = await sb.from('board_posts').update(row).eq('id', p.id));
+    }else{
+      row.author_id = S.me.id; row.author_name = S.me.name;
+      ({ error } = await sb.from('board_posts').insert(row));
+    }
+    if(error){ toast('저장하지 못했습니다: '+error.message,'bad'); return false; }
+    toast(p?'글을 고쳤습니다':'글을 올렸습니다');
+    p ? showPost(p.id) : openTab('board');
+    return true;
+  }, ()=>{ setBoardFiles('p_files', (p?.files)||[]); });
+}
+async function deletePost(id, title){
+  if(!confirm(`'${title}' 글을 지울까요?\n답글도 함께 지워집니다. 되돌릴 수 없습니다.`)) return;
+  const { error } = await sb.from('board_posts').delete().eq('id', id);
+  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
+  toast('글을 지웠습니다'); openTab('board');
+}
+async function togglePin(id, on){
+  const { error } = await sb.from('board_posts').update({ is_pinned:on }).eq('id', id);
+  if(error){ toast(error.message,'bad'); return; }
+  toast(on?'맨 위에 고정했습니다':'고정을 풀었습니다'); showPost(id);
+}
+
+/* 답글 (상담사·관리자 모두) */
+async function addReply(postId){
+  const body=$('rep_body').value.trim();
+  const files=boardFiles('rep_files');
+  if(!body && !files.length){ toast('내용을 적어 주세요','bad'); return; }
+  const { error } = await sb.from('board_replies').insert({
+    post_id: postId, body: body||'(파일만 올림)', files,
+    author_id: S.me.id, author_name: S.me.name,
+  });
+  if(error){ toast('올리지 못했습니다: '+error.message,'bad'); return; }
+  toast('답글을 올렸습니다'); showPost(postId);
+}
+async function deleteReply(id, postId){
+  if(!confirm('이 답글을 지울까요?')) return;
+  const { error } = await sb.from('board_replies').delete().eq('id', id);
+  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
+  toast('답글을 지웠습니다'); showPost(postId);
 }
 
 /* ═══════════════════════════════════════════════════
