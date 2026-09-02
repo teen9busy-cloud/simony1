@@ -408,9 +408,25 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .bar-num{width:88px;flex-shrink:0;text-align:right;font-size:15px;font-weight:600}
 .bar-pct{color:var(--sub);font-weight:400;margin-left:6px;font-size:14px}
 
+/* ── 게시판식 목록 ──
+   자료가 쌓이면 카드는 한 화면에 몇 건 안 들어옵니다. 한 줄에 한 건씩 담고,
+   위에서 연도·월로 걸러 보는 방식이 훨씬 빨리 눈에 들어옵니다. */
+.filter-bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:14px}
+.filter-bar select,.filter-bar input{padding:9px 11px;font-size:15.5px;
+  border:1px solid var(--line);border-radius:var(--radius-sm);background:#fff}
+.filter-bar select:focus,.filter-bar input:focus{outline:2px solid var(--accent);
+  outline-offset:-1px;border-color:var(--accent)}
+table.list-table{font-size:15.5px}
+table.list-table th{font-size:13.5px;padding:9px 11px}
+table.list-table td{padding:9px 11px;border-bottom:1px solid var(--line2)}
+table.list-table td b{font-size:16px;font-weight:600}
+table.list-table td.num{text-align:center;color:var(--sub)}
+table.list-table tbody tr:nth-child(even){background:#fbfdfc}
+table.list-table tbody tr:hover{background:var(--accent-soft)}
+.tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:13px;
+  font-weight:700;background:var(--accent-soft);color:var(--accent-dark)}
+
 /* 게시판 — 오래 읽는 글이므로 본문을 크고 넉넉하게 둡니다 */
-.board-list tbody tr:hover{background:var(--accent-soft)}
-.board-list td b{font-size:17.5px}
 .post-body{white-space:pre-wrap;font-size:18px;line-height:1.9;margin-top:18px;
   max-width:64ch;color:var(--ink)}
 .post-meta{color:var(--sub);font-size:15.5px;margin-top:2px}
@@ -625,7 +641,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-02 삭제·휴지통';
+const APP_VERSION = '2026-09-02 목록표';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -2418,6 +2434,44 @@ async function saveRecord(){
 /* ═══════════════════════════════════════════════════
    목록 — 저장된 기록을 표로
    ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   기록 목록 — 게시판(표) 방식
+
+   전에는 기록 하나가 카드 한 장이었습니다. 몇 건일 때는 보기 좋지만
+   1년치가 쌓이면 화면을 한참 굴려도 몇 건 못 봅니다.
+   구 시모니 0.5의 업무보고 목록처럼 한 줄에 한 건씩, 연도·월로 걸러
+   보는 방식으로 바꿉니다. 한 화면에 20건 넘게 들어옵니다.
+   ═══════════════════════════════════════════════════ */
+
+// 이 폼에서 '실시일'로 볼 항목 (날짜형 첫 항목). 없으면 작성 시각을 씁니다.
+function listDateField(){ return (S.fields||[]).find(f=>f.field_type==='date') || null; }
+function recDate(r){
+  const f = listDateField();
+  const v = f ? r.data?.[f.field_key] : null;
+  return String(v || r.created_at || '').slice(0,10);
+}
+// 목록의 '구분' 칸에 쓸 항목 (통계 대상인 첫 '하나 선택' 항목)
+function listKindField(){
+  return (S.fields||[]).find(f=>f.field_type==='select' && f.stats_enabled && !f.lookup_source) || null;
+}
+// 제목 칸 — 내담자를 붙이는 폼이면 이름, 아니면 장소·제목류를 이어 붙입니다
+function recTitle(r){
+  if(S.form.links_client) return r.client_name || '이름 없음';
+  const pick = ['title','place','subject','name','topic'];
+  for(const k of pick) if(r.data?.[k]) return String(r.data[k]);
+  const f = (S.fields||[]).find(x=>['text'].includes(x.field_type) && r.data?.[x.field_key]);
+  return f ? String(r.data[f.field_key]) : S.form.title;
+}
+function recFileCount(r){
+  let n = 0;
+  for(const f of (S.fields||[])){
+    if(f.field_type!=='file') continue;
+    const v = r.data?.[f.field_key];
+    if(Array.isArray(v)) n += v.length;
+  }
+  return n;
+}
+
 async function renderList(){
   const c=$('content');
   c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
@@ -2426,71 +2480,142 @@ async function renderList(){
     .eq('form_id', S.form.id).order('sort_order');
   S.fields = fields || [];
 
+  // 연도·월로 거를 수 있게 넉넉히 불러 옵니다. 넘치면 아래에서 '더 보기'.
+  S._listLimit = S._listLimit || 1000;
   const { data: recs, error } = await sb.from('form_records').select('*')
-    .eq('form_id', S.form.id).order('created_at',{ascending:false}).limit(200);
+    .eq('form_id', S.form.id).order('created_at',{ascending:false}).limit(S._listLimit);
   if(error){ c.innerHTML=`<div class="panel"><div class="msg bad">${esc(error.message)}</div></div>`; return; }
-
-  const rname = {}; S.regions.forEach(r=>rname[r.id]=r.name);
-  // 표에 보여줄 대표 항목 3개 (통계 대상 항목 우선)
-  const cols = S.fields.filter(f=>f.stats_enabled && f.field_type!=='file').slice(0,3);
+  S._all = recs || [];
 
   let html = `<div class="panel">
-    <h2>기록 목록</h2>
-    <div class="desc">최근 ${recs.length}건 · 행을 누르면 전체 내용을 봅니다</div>
-    <div class="grid"><div class="field">
-      <label>어떤 기록을 볼까요</label>
-      <select onchange="openTab('list:'+this.value)">
+    <h2>기록 목록 <span class="cnt" id="listCnt"></span></h2>
+    <div class="desc">한 줄이 기록 한 건입니다. 줄을 누르면 전체 내용을 봅니다.</div>
+    <div class="filter-bar">
+      <select onchange="openTab('list:'+this.value)" title="어떤 기록을 볼까요">
         ${S.forms.map(f=>`<option value="${f.id}"
           ${f.id===S.form.id?'selected':''}>${esc(f.title)}</option>`).join('')}
-      </select></div></div>`;
+      </select>
+      <select id="lsYear" onchange="renderListRows()"></select>
+      <select id="lsMonth" onchange="renderListRows()">
+        <option value="">전체 월</option>
+        ${Array.from({length:12},(_,i)=>{const m=String(i+1).padStart(2,'0');
+          return `<option value="${m}">${i+1}월</option>`;}).join('')}
+      </select>
+      <select id="lsKind" onchange="renderListRows()"></select>
+      <input type="text" id="lsQ" placeholder="이름·장소로 찾기" oninput="renderListRows()"
+        style="min-width:170px">
+      <select id="lsSort" onchange="renderListRows()" style="margin-left:auto">
+        <option value="date">실시일 최신순</option>
+        <option value="input">등록순 (나중에 넣은 것부터)</option>
+      </select>
+    </div>`;
 
-  if(!recs.length){
+  if(!S._all.length){
     html += `<div class="empty">아직 저장된 기록이 없습니다.<br>
       위쪽 '${esc(S.form.title)}' 탭에서 첫 기록을 남겨보세요.</div></div>`;
     c.innerHTML = html; return;
   }
 
-  // 인쇄할 것을 고르는 줄
-  html += `<div class="actions" style="border-top:0;padding-top:0;margin-bottom:4px">
-    <button class="btn ghost" onclick="printPickAll(true)">전체 선택</button>
+  html += `<div class="actions" style="border-top:0;padding-top:0;margin-bottom:2px">
+    <button class="btn ghost" onclick="printPickAll(true)">보이는 것 전체 선택</button>
     <button class="btn ghost" onclick="printPickAll(false)">선택 해제</button>
     <button class="btn" onclick="printPicked()">선택한 기록 인쇄</button>
     <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
       onclick="trashPicked()">선택한 기록 지우기</button>
-    <span class="hint" style="margin-left:auto">왼쪽 네모칸으로 고른 뒤 누르세요.
-      집단상담은 한 명만 골라도 그 모임 전체가 한 장으로 인쇄됩니다.<br>
-      지운 것은 휴지통으로 갑니다. 본인이 쓴 기록만 지울 수 있습니다(관리자는 전부).</span>
+  </div>
+  <div class="hint" style="margin-bottom:10px">집단상담은 한 명만 골라도 그 모임 전체가 한 장으로
+    인쇄됩니다. 지운 것은 휴지통으로 가고, 본인이 쓴 기록만 지울 수 있습니다(관리자는 전부).</div>
+  <div class="scroll-x"><div id="listRows"></div></div>
   </div>`;
-
-  // 카드로 그립니다. 좁은 화면에서도 찌그러지지 않습니다.
-  html += `<div class="rec-list">`;
-  recs.forEach((r,i)=>{
-    const cells = cols.map(f=>{
-      const v = cellText(r.data?.[f.field_key]);
-      return v ? `<div><span>${esc(f.label)}</span>${esc(v)}</div>` : '';
-    }).join('');
-    html += `<div class="rec" onclick="openDetail(${i})">
-      <div class="rec-head">
-        <input type="checkbox" name="recpick" value="${i}"
-          onclick="event.stopPropagation()" title="인쇄할 기록으로 고르기"
-          style="width:19px;height:19px;flex-shrink:0;cursor:pointer">
-        ${S.form.links_client
-          ? `<span class="rec-name">${r.client_id
-              ? `<a href="#" onclick="event.stopPropagation();openClient('${r.client_id}');return false"
-                  style="color:var(--accent)">${esc(r.client_name||'이름 없음')}</a>`
-              : esc(r.client_name||'이름 없음')}</span>`
-          : `<span class="rec-name">${esc(r.data?.title || r.data?.place || S.form.title)}</span>`}
-        <span class="rec-sub">${fmtDate(r.created_at)} · ${esc(rname[r.region_id]||'')}
-          · ${esc(r.author_name||'')}</span>
-        ${r.group_id ? `<span class="chip">집단</span>` : ''}
-      </div>
-      ${cells ? `<div class="rec-grid">${cells}</div>` : ''}
-    </div>`;
-  });
-  html += `</div></div>`;
   c.innerHTML = html;
-  S._recs = recs;
-  console.log('[시모니] 기록 목록', S.form.title, '→', recs.length, '건');
+
+  // 연도 목록은 실제 자료에서 뽑습니다 (없는 해는 아예 안 보여 줍니다)
+  const years = [...new Set(S._all.map(r=>recDate(r).slice(0,4)).filter(y=>/^\d{4}$/.test(y)))]
+    .sort().reverse();
+  const thisYear = String(new Date().getFullYear());
+  $('lsYear').innerHTML = `<option value="">전체 연도</option>`
+    + years.map(y=>`<option value="${y}" ${y===thisYear?'selected':''}>${y}년</option>`).join('');
+
+  const kf = listKindField();
+  $('lsKind').innerHTML = kf
+    ? `<option value="">전체 ${esc(kf.label)}</option>`
+      + (kf.options||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')
+    : `<option value="">—</option>`;
+  $('lsKind').style.display = kf ? '' : 'none';
+
+  renderListRows();
+  console.log('[시모니] 기록 목록', S.form.title, '→', S._all.length, '건 불러옴');
+}
+
+// 거르기·줄 세우기를 적용해 표만 다시 그립니다 (다시 불러오지 않습니다)
+function renderListRows(){
+  const box = $('listRows'); if(!box) return;
+  const y = $('lsYear')?.value || '';
+  const m = $('lsMonth')?.value || '';
+  const k = $('lsKind')?.value || '';
+  const q = ($('lsQ')?.value || '').trim();
+  const sort = $('lsSort')?.value || 'date';
+  const kf = listKindField();
+
+  let rows = (S._all||[]).filter(r=>{
+    const d = recDate(r);
+    if(y && d.slice(0,4) !== y) return false;
+    if(m && d.slice(5,7) !== m) return false;
+    if(k && kf && String(r.data?.[kf.field_key]||'') !== k) return false;
+    if(q){
+      const hay = `${r.client_name||''} ${r.author_name||''} ${recTitle(r)} `
+        + Object.values(r.data||{}).filter(v=>typeof v==='string').join(' ');
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  rows.sort(sort==='date'
+    ? (a,b)=> recDate(b).localeCompare(recDate(a))
+           || String(b.created_at).localeCompare(String(a.created_at))
+    : (a,b)=> String(b.created_at).localeCompare(String(a.created_at)));
+
+  S._recs = rows;                       // 인쇄·삭제·상세보기가 이 순서를 씁니다
+  const cnt = $('listCnt');
+  if(cnt) cnt.textContent = rows.length.toLocaleString()+'건'
+    + (rows.length !== (S._all||[]).length ? ` / 전체 ${S._all.length.toLocaleString()}건` : '');
+
+  if(!rows.length){
+    box.innerHTML = `<div class="empty">고른 조건에 맞는 기록이 없습니다.</div>`;
+    return;
+  }
+  const rname = {}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
+  const dLabel = listDateField()?.label || '작성일';
+
+  box.innerHTML = `<table class="list-table"><thead><tr>
+      <th style="width:38px"></th>
+      <th style="width:56px">번호</th>
+      <th style="width:110px">${esc(dLabel)}</th>
+      ${kf?`<th style="width:165px">${esc(kf.label)}</th>`:''}
+      <th>${S.form.links_client?'내담자':'제목 · 장소'}</th>
+      <th style="width:110px">지역</th>
+      <th style="width:96px">작성자</th>
+      <th style="width:66px">첨부</th>
+    </tr></thead><tbody>${rows.map((r,i)=>{
+      const n = recFileCount(r);
+      return `<tr onclick="openDetail(${i})">
+        <td onclick="event.stopPropagation()"><input type="checkbox" name="recpick" value="${i}"
+          style="width:18px;height:18px;cursor:pointer"></td>
+        <td class="num">${rows.length - i}</td>
+        <td class="nowrap">${esc(recDate(r))}</td>
+        ${kf?`<td class="nowrap" style="color:var(--sub)">${esc(String(r.data?.[kf.field_key]||'—'))}</td>`:''}
+        <td><b>${S.form.links_client && r.client_id
+            ? `<a href="#" onclick="event.stopPropagation();openClient('${r.client_id}');return false"
+                 style="color:var(--accent)">${esc(recTitle(r))}</a>`
+            : esc(recTitle(r))}</b>${r.group_id?' <span class="tag">집단</span>':''}</td>
+        <td>${esc(rname[r.region_id]||'—')}</td>
+        <td>${esc(r.author_name||'—')}</td>
+        <td class="num">${n?`<span class="tag">${n}</span>`:'<span style="color:var(--line)">—</span>'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>
+    ${(S._all.length === (S._listLimit||1000))
+      ? `<div class="actions" style="border-top:0"><button class="btn ghost"
+          onclick="S._listLimit=(S._listLimit||1000)+1000;renderList()">더 불러오기 (1,000건 더)</button></div>`
+      : ''}`;
 }
 function cellText(v){
   if(v===null||v===undefined) return '';
@@ -5267,6 +5392,14 @@ function regionScopeLabel(regionId){
   const kids = (S.regions||[]).filter(x=>x.parent_id===regionId).length;
   return kids ? `${r.name} (아래 지역 모두)` : r.name;
 }
+// 목록 칸처럼 좁은 자리에서는 지역 이름만 쓰고, 아래로 내려가는 글은 작은 딱지로 표시합니다.
+// ('경남소방 (아래 지역 모두)'는 한 칸에 두 줄로 접혀서 줄 높이가 들쭉날쭉해집니다)
+function regionShort(regionId){
+  const r = (S.regions||[]).find(x=>x.id===regionId);
+  if(!r) return '—';
+  const kids = (S.regions||[]).filter(x=>x.parent_id===regionId).length;
+  return esc(r.name) + (kids ? ' <span class="tag" title="아래 지역까지 모두 보입니다">아래 전체</span>' : '');
+}
 
 async function renderBoard(postId){
   if(postId) return showPost(postId);
@@ -5285,35 +5418,74 @@ async function renderBoard(postId){
       .select('post_id').in('post_id', S._posts.map(p=>p.id));
     (reps||[]).forEach(r=>{ counts[r.post_id]=(counts[r.post_id]||0)+1; });
   }
-  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
+  S._replyCounts = counts;
 
   let html = `<div class="panel">
-    <h2>게시판</h2>
+    <h2>게시판 <span class="cnt" id="boardCnt"></span></h2>
     <div class="desc">${canManage()
       ? '공지와 자료를 올립니다. 상담사는 읽고 답글을 답니다.'
       : '관리자가 올린 공지입니다. 궁금한 점은 답글로 남겨 주세요.'}</div>
-    ${canManage()?`<div class="actions"><button class="btn" onclick="editPost(null)">새 글 쓰기</button></div>`:''}`;
+    <div class="filter-bar">
+      ${canManage()?`<button class="btn" onclick="editPost(null)">새 글 쓰기</button>`:''}
+      <select id="bdYear" onchange="renderBoardRows()"></select>
+      <select id="bdRegion" onchange="renderBoardRows()"></select>
+      <input type="text" id="bdQ" placeholder="제목·올린 사람으로 찾기"
+        oninput="renderBoardRows()" style="min-width:200px">
+    </div>`;
 
   if(!S._posts.length){
     html += `<div class="empty">아직 올라온 글이 없습니다.</div></div>`;
     c.innerHTML=html; return;
   }
-  html += `<div style="overflow:auto"><table class="board-list"><thead><tr>
-    <th style="width:74px"></th><th>제목</th><th>지역</th><th>올린 사람</th><th>날짜</th>
-    </tr></thead><tbody>`;
-  S._posts.forEach(p=>{
-    const n = counts[p.id]||0;
-    html += `<tr style="cursor:pointer" onclick="openTab('board:${p.id}')">
-      <td style="white-space:nowrap">${p.is_pinned?'<span class="chip">고정</span>':''}</td>
-      <td><b>${esc(p.title)}</b>
-        ${n?` <span class="hint">답글 ${n}</span>`:''}
-        ${(p.files||[]).length?` <span class="hint">첨부 ${p.files.length}</span>`:''}</td>
-      <td>${esc(regionScopeLabel(p.region_id)||'—')}</td>
-      <td>${esc(p.author_name||'')}</td>
-      <td>${fmtDate(p.created_at)}</td></tr>`;
-  });
-  html += `</tbody></table></div></div>`;
+  html += `<div class="scroll-x"><div id="boardRows"></div></div></div>`;
   c.innerHTML=html;
+
+  const years = [...new Set(S._posts.map(p=>String(p.created_at).slice(0,4)))].sort().reverse();
+  $('bdYear').innerHTML = `<option value="">전체 연도</option>`
+    + years.map(y=>`<option value="${y}">${y}년</option>`).join('');
+  const regs = [...new Set(S._posts.map(p=>p.region_id))];
+  $('bdRegion').innerHTML = `<option value="">전체 지역</option>`
+    + regs.map(id=>`<option value="${id}">${esc(regionScopeLabel(id)||'—')}</option>`).join('');
+
+  renderBoardRows();
+}
+// 거른 결과만 다시 그립니다. 고정 글은 언제나 맨 위에 남습니다.
+function renderBoardRows(){
+  const box = $('boardRows'); if(!box) return;
+  const y = $('bdYear')?.value || '';
+  const rg = $('bdRegion')?.value || '';
+  const q = ($('bdQ')?.value || '').trim();
+  const counts = S._replyCounts || {};
+
+  const list = (S._posts||[]).filter(p=>{
+    if(y && String(p.created_at).slice(0,4) !== y) return false;
+    if(rg && p.region_id !== rg) return false;
+    if(q && !`${p.title||''} ${p.author_name||''} ${p.body||''}`.includes(q)) return false;
+    return true;
+  });
+  const cnt = $('boardCnt');
+  if(cnt) cnt.textContent = list.length + '건'
+    + (list.length !== S._posts.length ? ` / 전체 ${S._posts.length}건` : '');
+
+  if(!list.length){ box.innerHTML = `<div class="empty">찾는 글이 없습니다.</div>`; return; }
+  // 번호는 고정 글을 빼고 오래된 것부터 1번을 매깁니다 (게시판에서 익숙한 방식)
+  const plain = list.filter(p=>!p.is_pinned);
+  const no = new Map(); plain.forEach((p,i)=>no.set(p.id, plain.length - i));
+
+  box.innerHTML = `<table class="list-table"><thead><tr>
+      <th style="width:74px">번호</th><th>제목</th>
+      <th style="width:180px">지역</th><th style="width:100px">올린 사람</th>
+      <th style="width:106px">날짜</th>
+    </tr></thead><tbody>${list.map(p=>{
+      const n = counts[p.id]||0, fn = (p.files||[]).length;
+      return `<tr onclick="openTab('board:${p.id}')">
+        <td class="num nowrap">${p.is_pinned?'<span class="tag">고정</span>':no.get(p.id)}</td>
+        <td><b>${esc(p.title)}</b>${n?` <span class="tag">답글 ${n}</span>`:''}${
+          fn?` <span class="tag">첨부 ${fn}</span>`:''}</td>
+        <td class="nowrap">${regionShort(p.region_id)}</td>
+        <td>${esc(p.author_name||'')}</td>
+        <td class="nowrap">${fmtDate(p.created_at)}</td></tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 /* 글 한 편과 답글들 */
