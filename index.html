@@ -425,6 +425,10 @@ table.list-table tbody tr:nth-child(even){background:#fbfdfc}
 table.list-table tbody tr:hover{background:var(--accent-soft)}
 .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:13px;
   font-weight:700;background:var(--accent-soft);color:var(--accent-dark)}
+.tag.risk{background:var(--warn-soft);color:var(--warn)}
+/* 긴 이름이 두 줄로 접혀 줄 높이가 들쭉날쭉해지지 않게, 넘치면 …로 줄입니다.
+   (전체 이름은 마우스를 올리면 뜹니다) */
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 게시판 — 오래 읽는 글이므로 본문을 크고 넉넉하게 둡니다 */
 .post-body{white-space:pre-wrap;font-size:18px;line-height:1.9;margin-top:18px;
@@ -641,7 +645,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-02 목록표';
+const APP_VERSION = '2026-09-02 내담자표';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -4728,10 +4732,21 @@ async function enrichClients(rows){
     // 부가 정보를 못 가져와도 명단 자체는 보여 줍니다
     console.warn('최근 상담·검사 정보를 불러오지 못했습니다:', e);
   }
-  const last={}, test={};
-  recs.forEach(r=>{ if(!last[r.client_id]) last[r.client_id]=r; });   // 정렬됐으니 첫 건이 최신
-  tests.forEach(t=>{ if(!test[t.client_id]) test[t.client_id]=t; });
-  return { last, test };
+  const last={}, test={}, cnt={}, tcnt={};
+  recs.forEach(r=>{
+    if(!last[r.client_id]) last[r.client_id]=r;   // 정렬됐으니 첫 건이 최신
+    cnt[r.client_id] = (cnt[r.client_id]||0) + 1;
+  });
+  tests.forEach(t=>{
+    if(!test[t.client_id]) test[t.client_id]=t;
+    tcnt[t.client_id] = (tcnt[t.client_id]||0) + 1;
+  });
+  return { last, test, cnt, tcnt };
+}
+// 이 사람이 고위험인가 (마지막 간이검사 기준)
+function isHighRisk(t){
+  return !!t && ((t.ptsd_score||0)>=CUT.ptsd || (t.dep_score||0)>=CUT.dep
+              || (t.suicide_risk||0)>=CUT.suicide);
 }
 function testCellHTML(t){
   if(!t) return '<span style="color:var(--sub)">검사 없음</span>';
@@ -4752,47 +4767,61 @@ function statusChip(st){
   return ` <span class="chip ${warn?'risk':''}" style="padding:2px 9px;font-size:14px">${esc(st)}</span>`;
 }
 
+/* 사람 목록을 한 줄에 한 명씩 담은 표로 그립니다.
+
+   전에는 사람 하나가 카드 한 장이라, 담당 인원이 쉰 명만 넘어도 화면을 한참
+   굴려야 했습니다. 상담사가 실제로 훑고 싶은 것은 개인식별번호 같은 번호가
+   아니라 «누가 언제 마지막으로 왔고, 몇 번 왔고, 검사가 어땠나»입니다.
+   번호들은 이름을 눌러 들어가면 상세 화면에 다 있으므로 표에서는 뺐습니다. */
 async function peopleTable(rows, emptyMsg){
   if(!rows || !rows.length) return `<div class="empty">${esc(emptyMsg)}</div>`;
-  const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
+  const enr = await enrichClients(rows);
+  return `<div class="scroll-x">${peopleTableHTML(rows, enr)}</div>`;
+}
+function peopleTableHTML(rows, enr){
+  const rname={}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
   const fname={}; S.forms.forEach(f=>fname[f.id]=f.title);
-  const { last, test } = await enrichClients(rows);
+  const { last, test, cnt } = enr;
 
-  // 표 대신 카드로 그립니다. 좁은 화면에서도 찌그러지지 않고,
-  // 사람마다 한 덩어리로 보여 눈으로 좇기 쉽습니다.
-  return `<div class="person-list">` + rows.map(c=>{
-    const age = ageFromBirth(c.birth_date);
-    const belong = [c.extra?.department, c.extra?.rank].filter(Boolean).join(' · ');
-    const lastRec = last[c.id];
-    const t = test[c.id];
-    const hi = t && ((t.ptsd_score||0)>=CUT.ptsd || (t.dep_score||0)>=CUT.dep
-                     || (t.suicide_risk||0)>=CUT.suicide);
-    return `<div class="person" onclick="openClient('${c.id}')">
-      <div class="p-head">
-        <span class="p-name">${esc(c.name)}</span>
-        <span class="p-sub">${esc(c.birth_date||'생년월일 없음')}${age!==null?` (만 ${age}세)`:''}
-          · ${esc(c.gender||'')}</span>
-        ${c.status && c.status!=='재직'
-          ? `<span class="chip ${['전출','퇴직'].includes(c.status)?'risk':''}">${esc(c.status)}</span>`
-          : ''}
-        ${hi ? `<span class="chip risk">고위험</span>` : ''}
-      </div>
-      <div class="p-grid">
-        <div><span>지역</span>${esc(rname[c.region_id]||'—')}</div>
-        <div><span>소속 / 계급</span>${esc(belong||'—')}</div>
-        <div><span>개인식별아이디</span>${esc(c.personal_id||c.internal_id||'—')}</div>
-        <div><span>디지털 식별번호</span>${esc(c.digital_id||'—')}</div>
-        <div><span>사번</span>${esc(c.employee_no||'—')}</div>
-        <div><span>최근 상담</span>${lastRec
-          ? esc(fname[lastRec.form_id]||'기록') + ' · ' + fmtDate(lastRec.created_at)
-          : '없음'}</div>
-        <div><span>최근 검사</span>${t
-          ? `<b style="${hi?'color:var(--warn)':''}">P${t.ptsd_score??'-'} / 우${t.dep_score??'-'} / 자${t.suicide_risk??'-'}</b>
-             <span style="color:var(--sub)">· ${fmtDate(t.tested_at)}</span>`
-          : '없음'}</div>
-      </div>
-    </div>`;
-  }).join('') + `</div>`;
+  return `<table class="list-table"><thead><tr>
+      <th style="width:54px">번호</th>
+      <th style="width:96px">이름</th>
+      <th style="width:132px">생년월일</th>
+      <th style="width:60px">성별</th>
+      <th style="width:165px">소속</th>
+      <th style="width:74px">계급</th>
+      <th style="width:110px">지역</th>
+      <th style="width:64px">상담</th>
+      <th style="width:215px">최근 상담</th>
+      <th style="width:225px">최근 검사</th>
+      <th style="width:76px">상태</th>
+    </tr></thead><tbody>${rows.map((c,i)=>{
+      const age = ageFromBirth(c.birth_date);
+      const r = last[c.id], t = test[c.id], n = cnt[c.id]||0;
+      const hi = isHighRisk(t);
+      const left = ['전출','퇴직'].includes(c.status);
+      return `<tr onclick="openClient('${c.id}')" ${left?'style="opacity:.55"':''}>
+        <td class="num">${i+1}</td>
+        <td><b>${esc(c.name)}</b></td>
+        <td class="nowrap">${esc(c.birth_date||'—')}${age!==null
+            ? ` <span style="color:var(--sub)">(${age})</span>`:''}</td>
+        <td class="num">${esc(c.gender||'—')}</td>
+        <td><div class="ell" title="${esc(c.extra?.department||'')}">${esc(c.extra?.department||'—')}</div></td>
+        <td class="nowrap">${esc(c.extra?.rank||'—')}</td>
+        <td class="nowrap">${esc(rname[c.region_id]||'—')}</td>
+        <td class="num">${n?`<span class="tag">${n}</span>`:'<span style="color:var(--line)">—</span>'}</td>
+        <td class="nowrap">${r
+          ? `${esc(fname[r.form_id]||'기록')}
+             <span style="color:var(--sub)">${fmtDate(r.created_at)}</span>`
+          : '<span style="color:var(--sub)">없음</span>'}</td>
+        <td class="nowrap">${t
+          ? `<b style="${hi?'color:var(--warn)':''}">P${t.ptsd_score??'-'}·우${t.dep_score??'-'}·자${t.suicide_risk??'-'}</b>
+             <span style="color:var(--sub)">${fmtDate(t.tested_at)}</span>`
+          : '<span style="color:var(--sub)">없음</span>'}</td>
+        <td class="nowrap">${hi?'<span class="tag risk">고위험</span> ':''}${
+          c.status && c.status!=='재직' ? `<span class="tag${left?' risk':''}">${esc(c.status)}</span>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 // 전출·퇴직자 표시 여부 전환
@@ -4841,19 +4870,86 @@ async function showMyClients(){
   c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
   const { data: recs } = await sb.from('form_records').select('client_id,created_at')
     .eq('author_id', S.me.id).not('client_id','is',null)
-    .order('created_at',{ascending:false}).limit(500);
+    .order('created_at',{ascending:false}).limit(2000);
   const ids=[...new Set((recs||[]).map(r=>r.client_id))];
   let rows=[];
   if(ids.length){
-    const { data } = await sb.from('clients').select('*').in('id', ids.slice(0,100));
+    // 담당 인원이 300명을 넘는 경우는 없다고 보지만, 넘더라도 화면이 멈추지 않게 끊습니다
+    const { data } = await sb.from('clients').select('*').in('id', ids.slice(0,300));
     const order={}; ids.forEach((id,i)=>order[id]=i);
     rows=(data||[]).sort((a,b)=>order[a.id]-order[b.id]);
   }
-  const table = await peopleTable(rows,'아직 기록을 남긴 내담자가 없습니다.');
+  S._people = rows;
+  S._peopleEnr = rows.length ? await enrichClients(rows) : { last:{}, test:{}, cnt:{}, tcnt:{} };
+
+  const regs = [...new Set(rows.map(r=>r.region_id))];
+  const rname={}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
+
   c.innerHTML = `<div class="panel">
-    <h2>내 내담자</h2><div class="desc">내가 기록을 남긴 사람 ${rows.length}명 · 최근 순</div>
-    ${table}
-    <div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div></div>`;
+    <h2>내 내담자 <span class="cnt" id="pplCnt"></span></h2>
+    <div class="desc">내가 기록을 남긴 사람입니다. 줄을 누르면 그 사람의 모든 이력을 봅니다.
+      (개인식별아이디·디지털번호·사번은 상세 화면에 있습니다)</div>
+    <div class="filter-bar">
+      <input type="text" id="ppQ" placeholder="이름·소속으로 찾기" oninput="renderPeopleRows()"
+        style="min-width:180px">
+      <select id="ppRegion" onchange="renderPeopleRows()">
+        <option value="">전체 지역</option>
+        ${regs.map(id=>`<option value="${id}">${esc(rname[id]||'—')}</option>`).join('')}
+      </select>
+      <label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer">
+        <input type="checkbox" id="ppRisk" onchange="renderPeopleRows()"> 고위험만</label>
+      <label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer">
+        <input type="checkbox" id="ppLeft" onchange="renderPeopleRows()"> 전출·퇴직자도</label>
+      <select id="ppSort" onchange="renderPeopleRows()" style="margin-left:auto">
+        <option value="recent">최근에 만난 순</option>
+        <option value="old">오래 안 만난 순</option>
+        <option value="many">상담 많이 한 순</option>
+        <option value="name">이름 순</option>
+      </select>
+    </div>
+    <div class="scroll-x"><div id="peopleRows"></div></div>
+    <div class="actions"><button class="btn ghost" onclick="openTab('home')">대시보드로</button></div>
+  </div>`;
+  renderPeopleRows();
+}
+
+// 거르기·줄 세우기만 다시 합니다 (자료를 다시 불러오지 않습니다)
+function renderPeopleRows(){
+  const box = $('peopleRows'); if(!box) return;
+  const q = ($('ppQ')?.value||'').trim();
+  const rg = $('ppRegion')?.value || '';
+  const onlyRisk = !!$('ppRisk')?.checked;
+  const withLeft = !!$('ppLeft')?.checked;
+  const sort = $('ppSort')?.value || 'recent';
+  const { last, test, cnt } = S._peopleEnr || { last:{}, test:{}, cnt:{} };
+
+  let rows = (S._people||[]).filter(c=>{
+    if(!withLeft && ['전출','퇴직'].includes(c.status)) return false;
+    if(rg && c.region_id !== rg) return false;
+    if(onlyRisk && !isHighRisk(test[c.id])) return false;
+    if(q){
+      const hay = `${c.name||''} ${c.extra?.department||''} ${c.extra?.rank||''} ${c.extra?.team||''}`;
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const when = c => String(last[c.id]?.created_at || '');
+  rows.sort((a,b)=>{
+    if(sort==='name')  return String(a.name||'').localeCompare(String(b.name||''),'ko');
+    if(sort==='many')  return (cnt[b.id]||0) - (cnt[a.id]||0) || when(b).localeCompare(when(a));
+    if(sort==='old')   return when(a).localeCompare(when(b));
+    return when(b).localeCompare(when(a));
+  });
+
+  const hiN = rows.filter(c=>isHighRisk(test[c.id])).length;
+  const cntEl = $('pplCnt');
+  if(cntEl) cntEl.textContent = `${rows.length}명`
+    + (rows.length !== (S._people||[]).length ? ` / 전체 ${S._people.length}명` : '')
+    + (hiN ? ` · 고위험 ${hiN}명` : '');
+
+  box.innerHTML = rows.length
+    ? peopleTableHTML(rows, S._peopleEnr)
+    : `<div class="empty">고른 조건에 맞는 사람이 없습니다.</div>`;
 }
 
 /* ═══════════════════════════════════════════════════
