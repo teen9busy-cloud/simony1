@@ -268,7 +268,7 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
 .rec{background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent);
   border-radius:var(--radius);padding:13px 16px;cursor:pointer;transition:background .12s}
 .rec:hover{background:var(--accent-soft)}
-.rec-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.rec-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .rec-name{font-size:19px;font-weight:700}
 .rec-sub{font-size:15.5px;color:var(--sub)}
 .rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
@@ -441,6 +441,59 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   .dl dt{padding-bottom:2px}
   .wrap{padding:14px}
 }
+
+/* ═══════════════════════════════════════════════════
+   인쇄 — A4 한 장짜리 결재용 양식
+
+   화면에서 보기 좋은 것과 종이에 찍히는 것은 서로 다릅니다. 그래서 인쇄할 때는
+   앱 화면을 통째로 감추고, mm 단위로 짜 둔 A4 페이지만 남깁니다.
+   (구 시모니 0.5의 집단상담일지·업무보고서 출력 모듈과 같은 짜임입니다.)
+   ═══════════════════════════════════════════════════ */
+#printView{background:#e9ecea;min-height:100vh;padding-bottom:40px}
+.print-bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;
+  justify-content:space-between;gap:14px;flex-wrap:wrap;
+  background:#fff;border-bottom:2px solid var(--accent);
+  padding:14px 22px;box-shadow:var(--shadow)}
+.print-bar .hint{margin:0 0 0 10px;display:inline}
+#printPages{padding:22px 0}
+.doc-page{width:210mm;height:296mm;background:#fff;margin:0 auto 22px;
+  padding:15mm 18mm 18mm;box-sizing:border-box;position:relative;overflow:hidden;
+  box-shadow:0 4px 15px rgba(0,0,0,.10);
+  font-family:"Malgun Gothic","맑은 고딕",Pretendard,sans-serif;color:#111}
+.doc-stamp{position:absolute;top:14px;right:18px;border:1px solid #757575;
+  padding:3px 10px;font-size:11.5px;color:#555;font-weight:700}
+.doc-title{text-align:center;font-size:25px;font-weight:700;letter-spacing:6px;
+  margin:0 0 16px}
+table.doc-table{width:100%;border-collapse:collapse;table-layout:fixed}
+table.doc-table th,table.doc-table td{border:1px solid #222;padding:7px 9px;
+  font-size:13.5px;line-height:1.5;vertical-align:middle;word-break:break-all}
+table.doc-table th{background:#f5f5f5;font-weight:700;text-align:center}
+.doc-table td.c{text-align:center}
+.doc-pre{white-space:pre-wrap;margin:0;font-size:13.5px;line-height:1.55;
+  text-align:left;min-height:52px}
+.doc-photo{max-width:100%;max-height:230px;object-fit:contain;display:block;margin:0 auto}
+.doc-media{display:flex;align-items:center;justify-content:center;
+  height:100%;width:100%;box-sizing:border-box;padding-bottom:34px}
+.doc-media img{max-width:100%;max-height:225mm;object-fit:contain;border:1px solid #222}
+.doc-foot{position:absolute;bottom:12mm;left:18mm;right:18mm;text-align:right;
+  font-size:11px;color:#777;border-top:1px dashed #ddd;padding-top:3px}
+/* 아무리 줄여도 한 장에 안 들어가는 기록은, 잘라내지 않고 두 장에 걸쳐 찍습니다.
+   상담 기록에서 내용이 소리 없이 사라지는 것이 가장 나쁘기 때문입니다. */
+.doc-page.spill{height:auto;min-height:296mm;overflow:visible}
+.doc-page.spill .doc-foot{position:static;margin-top:14px}
+
+@media print{
+  @page{size:A4 portrait;margin:0}
+  html,body{background:#fff!important;width:210mm}
+  body>*{display:none!important}
+  body>#printView{display:block!important;background:#fff!important;padding:0!important}
+  .print-bar{display:none!important}
+  #printPages{padding:0!important}
+  .doc-page{width:210mm!important;height:297mm!important;min-height:0!important;
+    margin:0!important;box-shadow:none!important;
+    page-break-after:always;page-break-inside:avoid}
+  .doc-page:last-child{page-break-after:auto}
+}
 </style>
 </head>
 <body>
@@ -504,6 +557,19 @@ tbody tr:hover{background:var(--accent-soft);cursor:pointer}
   </div>
 </div>
 
+<!-- ══════ 인쇄 (평소에는 숨어 있다가 인쇄할 때만 나타납니다) ══════ -->
+<div id="printView" class="hidden">
+  <div class="print-bar">
+    <div><b id="printTitle">인쇄 미리보기</b>
+      <span class="hint" id="printCount"></span></div>
+    <div>
+      <button class="btn" onclick="window.print()">인쇄 / PDF로 저장</button>
+      <button class="btn ghost" onclick="closePrint()">돌아가기</button>
+    </div>
+  </div>
+  <div id="printPages"></div>
+</div>
+
 <!-- ══════ 공개 간이검사 (로그인 없이 여는 화면. 주소 끝에 #publictest) ══════ -->
 <div id="publicTestView" class="hidden">
   <header>
@@ -559,7 +625,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-01 선택버튼';
+const APP_VERSION = '2026-09-02 삭제·휴지통';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -621,7 +687,8 @@ const esc = s => String(s??'').replace(/[&<>"']/g, c =>
 // 이름에 따옴표가 섞이면 속성이 중간에 끊겨 버튼이 아예 동작하지 않기 때문입니다.
 const jsq = s => String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")
   .replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/[\r\n]/g,' ');
-function show(v){ ['setupView','loginView','appView','publicTestView'].forEach(x=>$(x).classList.toggle('hidden',x!==v)); }
+function show(v){ ['setupView','loginView','appView','printView','publicTestView']
+  .forEach(x=>$(x)?.classList.toggle('hidden',x!==v)); }
 function toast(msg,kind){
   const t=document.createElement('div');
   t.className='toast'+(kind==='bad'?' bad':''); t.textContent=msg;
@@ -632,7 +699,9 @@ function toast(msg,kind){
 document.addEventListener('keydown', e=>{
   if(e.key !== 'Escape') return;
   const all = document.querySelectorAll('.overlay');
-  if(all.length) all[all.length-1].remove();
+  if(all.length){ all[all.length-1].remove(); return; }
+  // 팝업이 없고 인쇄 화면을 보고 있으면 ESC로 돌아갑니다
+  if(!$('printView')?.classList.contains('hidden')) closePrint();
 });
 
 function fmtDate(iso){
@@ -2181,15 +2250,17 @@ function setFieldValue(f, v){
 function canEditRecord(r){
   return !!(S.me && r && (r.author_id===S.me.id || canManage()));
 }
-// 잘못 입력한 기록을 지운다. 되돌릴 수 없으므로 한 번 더 확인을 구합니다.
-// (누가 언제 지웠는지는 form_records에 걸린 trg_audit_records가 그대로 기록에 남깁니다.)
+// 잘못 입력한 기록을 지운다.
+// 바로 없애지 않고 휴지통으로 보냅니다. 관리자가 30일 안에 되살릴 수 있습니다.
+// 권한은 화면이 아니라 데이터베이스가 따집니다(patch25의 trash_record).
 async function deleteRecord(r){
   if(!canEditRecord(r)){ toast('이 기록을 지울 권한이 없습니다','bad'); return; }
   const who = r.client_name ? `'${r.client_name}' 님의 ` : '';
-  if(!confirm(`${who}이 기록을 정말 삭제할까요? 되돌릴 수 없습니다.`)) return;
-  const { error } = await sb.from('form_records').delete().eq('id', r.id);
-  if(error){ toast('삭제하지 못했습니다: '+error.message, 'bad'); return; }
-  toast('기록을 삭제했습니다');
+  if(!confirm(`${who}이 기록을 지울까요?\n\n바로 없어지지 않고 휴지통으로 갑니다.`
+    + `\n관리자가 관리 → 휴지통에서 되살릴 수 있습니다.`)) return;
+  const { error } = await sb.rpc('trash_record', { p_id: r.id });
+  if(error){ toast('지우지 못했습니다: '+error.message, 'bad'); return; }
+  toast('휴지통으로 보냈습니다');
   document.querySelectorAll('.overlay').forEach(o=>o.remove());
   if(S.tab) showTab(S.tab);
 }
@@ -2379,6 +2450,18 @@ async function renderList(){
     c.innerHTML = html; return;
   }
 
+  // 인쇄할 것을 고르는 줄
+  html += `<div class="actions" style="border-top:0;padding-top:0;margin-bottom:4px">
+    <button class="btn ghost" onclick="printPickAll(true)">전체 선택</button>
+    <button class="btn ghost" onclick="printPickAll(false)">선택 해제</button>
+    <button class="btn" onclick="printPicked()">선택한 기록 인쇄</button>
+    <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
+      onclick="trashPicked()">선택한 기록 지우기</button>
+    <span class="hint" style="margin-left:auto">왼쪽 네모칸으로 고른 뒤 누르세요.
+      집단상담은 한 명만 골라도 그 모임 전체가 한 장으로 인쇄됩니다.<br>
+      지운 것은 휴지통으로 갑니다. 본인이 쓴 기록만 지울 수 있습니다(관리자는 전부).</span>
+  </div>`;
+
   // 카드로 그립니다. 좁은 화면에서도 찌그러지지 않습니다.
   html += `<div class="rec-list">`;
   recs.forEach((r,i)=>{
@@ -2388,6 +2471,9 @@ async function renderList(){
     }).join('');
     html += `<div class="rec" onclick="openDetail(${i})">
       <div class="rec-head">
+        <input type="checkbox" name="recpick" value="${i}"
+          onclick="event.stopPropagation()" title="인쇄할 기록으로 고르기"
+          style="width:19px;height:19px;flex-shrink:0;cursor:pointer">
         ${S.form.links_client
           ? `<span class="rec-name">${r.client_id
               ? `<a href="#" onclick="event.stopPropagation();openClient('${r.client_id}');return false"
@@ -2427,7 +2513,8 @@ const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
-  const nav = ['grid','데이터 관리','records','전체 기록','master','상세소속','users','사용자',
+  const nav = ['grid','데이터 관리','records','전체 기록','trash','휴지통',
+               'master','상세소속','users','사용자',
                'sync','내담자 DB','upload','검사 업로드','settings','설정'];
   if(isSuper()){
     nav.unshift('forms','폼과 항목');
@@ -2454,6 +2541,7 @@ function renderAdmin(sub){
     return;
   }
   if(sub==='grid') adminGrid();
+  else if(sub==='trash') adminTrash();
   else if(sub==='records') adminRecords();
   else if(sub==='audit') adminAudit();
   else if(sub==='forms') adminForms();
@@ -2463,6 +2551,96 @@ function renderAdmin(sub){
   else if(sub==='upload') adminUpload();
   else if(sub==='settings') adminSettings();
   else adminUsers();
+}
+
+/* ── 휴지통 ──
+   지운 기록은 바로 없어지지 않고 여기로 옵니다. 관리자만 볼 수 있고,
+   되살리거나 아주 지울 수 있습니다. 상담 기록을 잘못 지웠을 때
+   되돌릴 방법이 하나도 없던 것을 메우기 위한 것입니다. */
+async function adminTrash(){
+  const box = $('adminBody');
+  box.innerHTML = '<div class="panel"><div class="empty">불러오는 중…</div></div>';
+  const { data, error } = await sb.from('deleted_records').select('*')
+    .order('deleted_at', { ascending:false }).limit(500);
+  if(error){
+    box.innerHTML = `<div class="panel"><div class="msg bad">
+      휴지통을 열지 못했습니다: ${esc(error.message)}
+      <div class="hint" style="margin-top:6px;color:inherit">
+        patch25 커리를 아직 실행하지 않았다면 먼저 실행해 주세요.</div></div></div>`;
+    return;
+  }
+  S._trash = data || [];
+  const rname={}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
+  const fname={}; S.forms.forEach(f=>fname[f.id]=f.title);
+  const days = d => Math.floor((Date.now()-new Date(d).getTime())/86400000);
+
+  let html = `<div class="panel">
+    <h2>휴지통 <span class="cnt">${S._trash.length}건</span></h2>
+    <div class="desc">지운 기록이 여기 남아 있습니다. 되살리면 원래 자리로 그대로 돌아갑니다
+      (내용·작성일·작성자 모두 그대로). 30일이 지난 것은 아래에서 비울 수 있습니다.</div>`;
+  if(!S._trash.length){
+    html += `<div class="empty">휴지통이 비어 있습니다.</div></div>`;
+    box.innerHTML = html; return;
+  }
+  const old = S._trash.filter(r=>days(r.deleted_at) >= 30).length;
+  html += `<div class="actions" style="border-top:0;padding-top:0">
+      <button class="btn ghost" onclick="purgeTrash()">30일 지난 것 비우기${
+        old?` (${old}건)`:''}</button>
+    </div>
+    <div class="scroll-x"><table class="grid-table"><thead><tr>
+      <th>지운 날</th><th>폼</th><th>내담자</th><th>지역</th>
+      <th>쓴 사람</th><th>지운 사람</th><th></th></tr></thead><tbody>`;
+  S._trash.forEach((r,i)=>{
+    const d = days(r.deleted_at);
+    html += `<tr>
+      <td class="g-first">${fmtDate(r.deleted_at)}
+        <div class="hint">${d===0?'오늘':d+'일 전'}</div></td>
+      <td>${esc(fname[r.form_id]||'—')}</td>
+      <td>${esc(r.client_name||'—')}</td>
+      <td>${esc(rname[r.region_id]||'—')}</td>
+      <td>${esc(r.author_name||'—')}</td>
+      <td>${esc(r.deleted_by_name||'—')}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn ghost" onclick="restoreTrash(${i})">되살리기</button>
+        <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
+          onclick="purgeOne(${i})">아주 지우기</button></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+  box.innerHTML = html;
+}
+async function restoreTrash(i){
+  const r = S._trash?.[i]; if(!r) return;
+  const { error } = await sb.rpc('restore_record', { p_id: r.id });
+  if(error){ toast('되살리지 못했습니다: '+error.message,'bad'); return; }
+  toast(`${r.client_name||'기록'} 을(를) 되살렸습니다`);
+  adminTrash();
+}
+async function purgeOne(i){
+  const r = S._trash?.[i]; if(!r) return;
+  if(!confirm(`${r.client_name?`'${r.client_name}' 님의 `:''}이 기록을 아주 지울까요?`
+    + `\n\n이번에는 정말 되돌릴 수 없습니다.`)) return;
+  const { error } = await sb.rpc('purge_record', { p_id: r.id });
+  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
+  toast('아주 지웠습니다'); adminTrash();
+}
+/* 내담자를 명부에서 지웁니다. 관리자만, 그리고 기록이 하나도 없는 사람만.
+   기록이 있는 사람을 지우면 그 기록들이 주인을 잃으므로 데이터베이스가 막습니다
+   (몇 건이 있는지 알려 줍니다). 그런 경우에는 상태를 전출·퇴직으로 바꿔야 합니다. */
+async function removeClient(id, name){
+  if(!confirm(`'${name}' 님을 명부에서 지울까요?\n\n`
+    + `상담 기록·검사 결과가 하나도 없는 사람만 지울 수 있습니다.\n되돌릴 수 없습니다.`)) return;
+  const { error } = await sb.rpc('delete_client', { p_id: id });
+  if(error){ toast(error.message, 'bad'); return; }
+  toast(`'${name}' 님을 명부에서 지웠습니다`);
+  openTab('clients');
+}
+
+async function purgeTrash(){
+  if(!confirm('휴지통에서 30일이 지난 기록을 아주 지울까요?\n\n되돌릴 수 없습니다.')) return;
+  const { data, error } = await sb.rpc('purge_trash', { p_days: 30 });
+  if(error){ toast('비우지 못했습니다: '+error.message,'bad'); return; }
+  toast(`${data||0}건을 아주 지웠습니다`); adminTrash();
 }
 
 /* ── 설정: 시모니 전체에 적용되는 값들 ── */
@@ -2825,6 +3003,7 @@ async function openRecordDetailByIndex(i){
       ${canEditRecord(r)?`<button class="btn" onclick="this.closest('.overlay').remove();editRecordModal(S._recRows[${i}])">수정</button>
       <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
         onclick="deleteRecord(S._recRows[${i}])">삭제</button>`:''}
+      <button class="btn ghost" onclick="this.closest('.overlay').remove();printOneRecord(${i})">인쇄</button>
       <button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button>
     </div>
   </div>`;
@@ -4604,7 +4783,13 @@ async function showClient(id){
         .map(f=>`<button class="btn${f.links_client?'':' ghost'}"
           onclick="startRecordFor('${p.id}','${f.id}')">${esc(f.title)} 작성</button>`).join('')}
       <button class="btn ghost" onclick="openSimpleTestFor('${p.id}')">간이검사 실시</button>
+      ${canManage() && !(recs?.length) && !(simples?.length) && !(comps?.length)
+        ? `<button class="btn ghost" style="color:var(--warn);border-color:var(--warn);margin-left:auto"
+            onclick="removeClient('${p.id}','${jsq(p.name)}')">명부에서 지우기</button>` : ''}
     </div>
+    ${canManage() && (recs?.length||simples?.length||comps?.length) ? `<div class="hint">
+      기록이 있는 사람은 명부에서 지울 수 없습니다. 더 이상 대상이 아니면
+      상태를 «전출» 또는 «퇴직»으로 바꿔 주세요 — 과거 기록은 그대로 남습니다.</div>` : ''}
   </div>`;
 
   // 상담 이력
@@ -5837,6 +6022,276 @@ function clearStat(){
   S._statRegion=''; S._statFrom=''; S._statTo=''; renderStats();
 }
 
+/* ═══════════════════════════════════════════════════
+   인쇄 — 기록을 A4 결재 양식으로 찍습니다
+
+   구 시모니 0.5는 상담 유형마다 양식을 따로 손으로 짜 두었습니다(집단상담일지,
+   회의 보고, 팀별 교육, 순회교육…). 1.0은 항목을 관리자가 직접 만들고 고치므로
+   양식을 박아 둘 수 없습니다. 그래서 폼 정의(form_fields)를 읽어 그때그때 표를
+   짭니다. 항목을 새로 만들면 인쇄물에도 그대로 따라 나옵니다.
+
+   짜는 규칙
+     · 짧은 항목(날짜·시각·숫자·하나 선택 등)은 두 개씩 한 줄에 나란히
+     · 긴 항목(여러 줄 글)은 제목 줄 + 내용 줄로 통째 한 줄
+     · 사진은 표 맨 아래 칸에
+     · '서명'이 들어간 항목은 다음 장에 원본 증빙으로 따로   (0.5와 같은 방식)
+     · 집단상담처럼 참여자마다 한 줄씩 저장된 기록은 한 장으로 묶고 참석자를 나열
+   ═══════════════════════════════════════════════════ */
+
+// 표에서 한 줄을 통째로 쓰는 항목인가
+const LONG_TYPES = ['textarea'];
+function isLongField(f, v){
+  if(LONG_TYPES.includes(f.field_type)) return true;
+  if(Array.isArray(v) && v.length > 2) return true;
+  return String(v==null?'':v).length > 34;
+}
+// '서명'이 든 파일 항목은 별지로 뺍니다
+function isSignField(f){ return /서명|사인|싸인/.test(String(f.label||'')); }
+
+function docText(v){
+  if(v===null||v===undefined) return '';
+  if(Array.isArray(v)) return v.join(', ');
+  if(typeof v==='boolean') return v?'예':'아니오';
+  // 1400-1500 처럼 저장된 시간대는 보기 좋게 풀어 씁니다
+  const m = String(v).match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+  if(m) return `${m[1]}:${m[2]} ~ ${m[3]}:${m[4]}`;
+  return String(v);
+}
+
+// 같은 group_id 로 저장된 줄들을 한 장으로 묶습니다.
+function groupForPrint(recs){
+  const out=[], seen=new Map();
+  for(const r of recs){
+    if(!r.group_id){ out.push({ head:r, members:[] }); continue; }
+    if(seen.has(r.group_id)){ seen.get(r.group_id).members.push(r); continue; }
+    const g = { head:r, members:[r] };
+    seen.set(r.group_id, g); out.push(g);
+  }
+  return out;
+}
+
+/* 인쇄 화면 열기.
+   recs   : 찍을 기록들 (form_records 행)
+   fields : 그 폼의 항목 정의
+   form   : 폼 (제목을 문서 제목으로 씁니다) */
+async function openPrint(recs, fields, form){
+  if(!recs || !recs.length){ toast('인쇄할 기록을 먼저 고르세요','bad'); return; }
+  toast('인쇄할 내용을 만드는 중…');
+
+  // 집단 기록은 한 명만 골랐어도 같은 모임의 나머지를 함께 불러옵니다
+  const gids = [...new Set(recs.map(r=>r.group_id).filter(Boolean))];
+  let all = recs;
+  if(gids.length){
+    const { data } = await sb.from('form_records').select('*').in('group_id', gids);
+    const byId = new Map(recs.map(r=>[r.id,r]));
+    (data||[]).forEach(r=>{ if(!byId.has(r.id)) byId.set(r.id,r); });
+    all = [...byId.values()];
+  }
+  all.sort((a,b)=> String(a.created_at).localeCompare(String(b.created_at)));
+  const groups = groupForPrint(all);
+
+  // 사진·서명부의 임시 주소를 한 번에 받아 옵니다 (주소가 곧 만료되므로 인쇄 직전에)
+  const wanted = [];
+  for(const g of groups){
+    for(const f of fields.filter(x=>x.field_type==='file')){
+      const v = g.head.data?.[f.field_key];
+      (Array.isArray(v)?v:[]).forEach(x=>{ if(x && x.path) wanted.push(x); });
+    }
+  }
+  const urlOf = {};
+  if(wanted.length){
+    (await signFiles(wanted)).forEach(x=>{ if(x.path && x.url) urlOf[x.path]=x.url; });
+  }
+
+  const rname = {}; (S.allRegions||S.regions||[]).forEach(x=>rname[x.id]=x.name);
+  const box = $('printPages');
+  box.innerHTML = groups.map(g=>docPagesHTML(g, fields, form, rname, urlOf)).join('');
+  $('printTitle').textContent = `${form?.title||'기록'} 인쇄`;
+  $('printCount').textContent = `${groups.length}건 · 종이 ${box.querySelectorAll('.doc-page').length}장`;
+  show('printView');
+  window.scrollTo(0,0);
+
+  // 사진이 다 그려진 뒤에 크기를 재야 정확합니다
+  await waitForImages(box);
+  const spilled = [];
+  box.querySelectorAll('.doc-page').forEach(p=>{ if(!shrinkToFit(p)) spilled.push(p); });
+  if(spilled.length){
+    spilled.forEach(p=>p.classList.add('spill'));
+    $('printCount').innerHTML = `${groups.length}건`
+      + ` <b style="color:var(--warn)">— 이 가운데 ${spilled.length}건은 내용이 길어`
+      + ` 여러 장에 걸쳐 찍힙니다 (내용을 잘라내지는 않았습니다)</b>`;
+  }
+}
+
+function waitForImages(box){
+  const imgs = [...box.querySelectorAll('img')];
+  if(!imgs.length) return Promise.resolve();
+  return Promise.all(imgs.map(im => im.complete ? null : new Promise(done=>{
+    im.addEventListener('load', done, {once:true});
+    im.addEventListener('error', done, {once:true});
+    setTimeout(done, 6000);          // 안 열리는 사진 때문에 멈추지 않게
+  })));
+}
+
+/* 기록 한 건(집단이면 한 모임) → 종이 여러 장 */
+function docPagesHTML(g, fields, form, rname, urlOf){
+  const r = g.head;
+  const stamp = esc(rname[r.region_id] || '시모니');
+  const foot = esc(r.group_id ? `모임코드 ${r.group_id}` : `기록 ${String(r.id).slice(0,8)}`);
+
+  // ── 머리 정보
+  const rows = [];
+  rows.push(pairRow('작성일자', fmtDate(r.created_at), '작성자', r.author_name||''));
+  if(form?.links_client){
+    if(g.members.length){
+      const names = g.members.map(m=>m.client_name||'').filter(Boolean);
+      rows.push(pairRow('지역', rname[r.region_id]||'', '참석인원', names.length+'명'));
+      rows.push(`<tr><th>참석자</th><td colspan="3">${esc(names.join(', '))}</td></tr>`);
+    }else{
+      rows.push(pairRow('지역', rname[r.region_id]||'', '내담자',
+        [r.client_name, r.birth_date, r.gender].filter(Boolean).join(' · ')));
+    }
+  }else{
+    rows.push(pairRow('지역', rname[r.region_id]||'', '', ''));
+  }
+
+  // ── 폼 항목
+  const shortQ = [];      // 짧은 항목을 둘씩 짝지어 넣기 위한 대기줄
+  const photos = [];      // 사진 항목
+  const signs  = [];      // 서명부 항목 (별지)
+  const flush = ()=>{
+    while(shortQ.length){
+      const a = shortQ.shift(), b = shortQ.shift();
+      rows.push(pairRow(a[0], a[1], b?b[0]:'', b?b[1]:''));
+    }
+  };
+  for(const f of fields){
+    const v = r.data?.[f.field_key];
+    if(v===null || v===undefined || v==='' || (Array.isArray(v)&&!v.length)) continue;
+    if(f.field_type==='file'){
+      const list = (Array.isArray(v)?v:[]).filter(x=>x && (urlOf[x.path]||x.url));
+      if(!list.length) continue;
+      (isSignField(f) ? signs : photos).push([f.label, list]);
+      continue;
+    }
+    const text = docText(v);
+    if(isLongField(f, v)){
+      flush();
+      rows.push(`<tr><th colspan="4">${esc(f.label)}</th></tr>
+        <tr><td colspan="4"><div class="doc-pre">${esc(text)}</div></td></tr>`);
+    }else{
+      shortQ.push([f.label, text]);
+    }
+  }
+  flush();
+
+  // ── 사진은 표 맨 아래
+  for(const [label, list] of photos){
+    rows.push(`<tr><th>${esc(label)}</th><td colspan="3" style="text-align:center">
+      ${list.map(x=>`<img class="doc-photo" src="${esc(urlOf[x.path]||x.url)}"
+        alt="${esc(label)}" crossorigin="anonymous">`).join('')}</td></tr>`);
+  }
+
+  let html = `<div class="doc-page">
+    <div class="doc-stamp">${stamp}</div>
+    <div class="doc-title">${esc(form?.title||'기록')}</div>
+    <table class="doc-table">
+      <colgroup><col style="width:18%"><col style="width:32%">
+                <col style="width:18%"><col style="width:32%"></colgroup>
+      ${rows.join('')}
+    </table>
+    <div class="doc-foot">${foot}</div>
+  </div>`;
+
+  // ── 서명부는 다음 장에 원본 그대로
+  for(const [label, list] of signs){
+    for(const x of list){
+      html += `<div class="doc-page">
+        <div class="doc-stamp">${stamp}</div>
+        <div class="doc-title" style="font-size:21px;letter-spacing:3px">${esc(label)} 원본 증빙</div>
+        <div class="doc-media" style="height:calc(100% - 90px)">
+          <img src="${esc(urlOf[x.path]||x.url)}" alt="${esc(label)}" crossorigin="anonymous"></div>
+        <div class="doc-foot">${foot} · ${esc(label)}</div>
+      </div>`;
+    }
+  }
+  return html;
+}
+function pairRow(l1, v1, l2, v2){
+  const cell = (l,v)=> l
+    ? `<th>${esc(l)}</th><td class="c">${esc(v||'-')}</td>`
+    : `<th></th><td></td>`;
+  return `<tr>${cell(l1,v1)}${cell(l2,v2)}</tr>`;
+}
+
+/* 한 장에 들어가도록 글자·사진·여백을 조금씩 줄입니다.
+   그래도 안 들어가면 false를 돌려주고, 부르는 쪽에서 두 장에 걸쳐 찍게 합니다. */
+function shrinkToFit(page){
+  const table = page.querySelector('.doc-table');
+  if(!table) return true;
+  const title = page.querySelector('.doc-title');
+  const budget = page.clientHeight - (title ? title.offsetHeight + 16 : 0) - 40;
+  const pres = [...page.querySelectorAll('.doc-pre')];
+  const imgs = [...page.querySelectorAll('.doc-photo')];
+  const cells = [...page.querySelectorAll('.doc-table th,.doc-table td')];
+  let fs = 13.5, lh = 1.55, ph = 230, pad = 7, guard = 0;
+  while(table.offsetHeight > budget && guard++ < 300){
+    let moved = false;
+    if(fs > 10.5){
+      fs -= 0.2; lh -= 0.008;
+      pres.forEach(e=>{ e.style.fontSize = fs.toFixed(1)+'px'; e.style.lineHeight = lh.toFixed(3); });
+      cells.forEach(c=>{ c.style.fontSize = fs.toFixed(1)+'px'; });
+      moved = true;
+    }
+    if(imgs.length && ph > 110){ ph -= 6; imgs.forEach(i=>{ i.style.maxHeight = ph+'px'; }); moved = true; }
+    if(pad > 3){ pad -= 0.4; cells.forEach(c=>{ c.style.paddingTop=pad.toFixed(1)+'px'; c.style.paddingBottom=pad.toFixed(1)+'px'; }); moved = true; }
+    if(!moved) break;
+  }
+  return table.offsetHeight <= budget;
+}
+
+function closePrint(){
+  $('printPages').innerHTML = '';
+  show('appView');
+}
+
+/* ── 기록 목록에서 골라 인쇄하기 ── */
+function printPickAll(on){
+  document.querySelectorAll('input[name="recpick"]').forEach(cb=>{ cb.checked = on; });
+}
+function printPicked(){
+  const idx = [...document.querySelectorAll('input[name="recpick"]:checked')].map(cb=>+cb.value);
+  if(!idx.length){ toast('인쇄할 기록을 골라 주세요 (왼쪽 네모칸)','bad'); return; }
+  openPrint(idx.map(i=>S._recs[i]), S.fields, S.form);
+}
+// 고른 기록을 한꺼번에 휴지통으로.
+// 하나라도 권한이 없으면 아무것도 지우지 않습니다(반만 지워지는 것이 더 나쁩니다).
+async function trashPicked(){
+  const idx = [...document.querySelectorAll('input[name="recpick"]:checked')].map(cb=>+cb.value);
+  if(!idx.length){ toast('지울 기록을 골라 주세요 (왼쪽 네모칸)','bad'); return; }
+  const recs = idx.map(i=>S._recs[i]);
+  const names = recs.map(r=>r.client_name).filter(Boolean).slice(0,3).join(', ');
+  if(!confirm(`${recs.length}건을 지울까요?${names?`\n(${names}${recs.length>3?' 외':''})`:''}`
+    + `\n\n바로 없어지지 않고 휴지통으로 갑니다. 관리자가 되살릴 수 있습니다.`)) return;
+  const { error } = await sb.rpc('trash_records', { p_ids: recs.map(r=>r.id) });
+  if(error){
+    toast('지우지 못했습니다: '+error.message
+      + ' (하나라도 권한이 없으면 아무것도 지우지 않습니다)','bad');
+    return;
+  }
+  toast(`${recs.length}건을 휴지통으로 보냈습니다`);
+  renderList();
+}
+
+// '전체 기록' 화면에서 한 건만 인쇄 — 그 기록이 속한 폼의 항목을 그때 불러옵니다
+async function printOneRecord(i){
+  const r = S._recRows?.[i]; if(!r) return;
+  const { data: fields, error } = await sb.from('form_fields').select('*')
+    .eq('form_id', r.form_id).order('sort_order');
+  if(error){ toast('항목을 불러오지 못했습니다: '+error.message,'bad'); return; }
+  openPrint([r], fields||[], S.forms.find(f=>f.id===r.form_id));
+}
+
 function openDetail(i){
   const r = S._recs[i];
   const rname = {}; S.regions.forEach(x=>rname[x.id]=x.name);
@@ -5861,6 +6316,7 @@ function openDetail(i){
       ${canEditRecord(r)?`<button class="btn" onclick="this.closest('.overlay').remove();editRecordModal(S._recs[${i}])">수정</button>
       <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
         onclick="deleteRecord(S._recs[${i}])">삭제</button>`:''}
+      <button class="btn ghost" onclick="this.closest('.overlay').remove();openPrint([S._recs[${i}]],S.fields,S.form)">인쇄</button>
       <button class="btn ghost" onclick="this.closest('.overlay').remove()">닫기</button>
     </div>
   </div>`;
