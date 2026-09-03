@@ -423,6 +423,27 @@ table.list-table td b{font-size:16px;font-weight:600}
 table.list-table td.num{text-align:center;color:var(--sub)}
 table.list-table tbody tr:nth-child(even){background:#fbfdfc}
 table.list-table tbody tr:hover{background:var(--accent-soft)}
+/* 만족도 설문 */
+.card-note{font-size:13px;color:var(--sub);margin-top:5px;line-height:1.45}
+.qopts.ten{gap:6px}
+.qopts.ten .qopt{flex:1 1 0;min-width:34px;max-width:56px;padding:13px 0;font-size:16px;text-align:center}
+.scale-ends{display:flex;justify-content:space-between;margin-top:7px;
+  font-size:13px;color:var(--sub)}
+/* 좁은 화면에서는 6+4로 어정쩡하게 접히므로, 5개씩 두 줄로 가지런히 놓습니다 */
+@media(max-width:560px){
+  .qopts.ten{gap:5px}
+  .qopts.ten .qopt{flex:0 0 calc(20% - 4px);max-width:none;padding:12px 0;font-size:15px}
+}
+table.list-table td.hi{font-weight:700;color:var(--accent-dark);text-align:center}
+table.list-table td.sd{color:var(--sub);font-size:14px;text-align:center}
+table.list-table tbody tr.total{background:var(--accent-soft);font-weight:700}
+table.list-table tbody tr.total:hover{background:var(--accent-soft)}
+.pc{display:block;font-size:12.5px;color:var(--sub);font-weight:400}
+.scroll-y{overflow-y:auto}
+.quote{border-left:3px solid var(--line);padding:8px 0 8px 12px;margin-bottom:12px}
+.q-meta{font-size:13px;color:var(--sub);margin-bottom:3px}
+.q-body{font-size:15.5px;white-space:pre-wrap;line-height:1.6}
+.btn.sm{padding:5px 11px;font-size:14px}
 .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:13px;
   font-weight:700;background:var(--accent-soft);color:var(--accent-dark)}
 .tag.risk{background:var(--warn-soft);color:var(--warn)}
@@ -625,6 +646,15 @@ table.doc-table th{background:#f5f5f5;font-weight:700;text-align:center}
   <div class="wrap" id="ptContent"></div>
 </div>
 
+<!-- ══════ 공개 만족도 설문 (로그인 없이 여는 화면. 주소 끝에 #survey) ══════ -->
+<div id="surveyView" class="hidden">
+  <header>
+    <h1>시모니 1.0</h1>
+    <span class="who">찾아가는 상담실 만족도 설문</span>
+  </header>
+  <div class="wrap" id="svContent"></div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════
    ◆ 여기 세 줄만 채우면 됩니다 ◆
@@ -671,7 +701,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-03 운영기록2';
+const APP_VERSION = '2026-09-03 만족도설문';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -737,7 +767,7 @@ const esc = s => String(s??'').replace(/[&<>"']/g, c =>
 // 이름에 따옴표가 섞이면 속성이 중간에 끊겨 버튼이 아예 동작하지 않기 때문입니다.
 const jsq = s => String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")
   .replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/[\r\n]/g,' ');
-function show(v){ ['setupView','loginView','appView','printView','publicTestView']
+function show(v){ ['setupView','loginView','appView','printView','publicTestView','surveyView']
   .forEach(x=>$(x)?.classList.toggle('hidden',x!==v)); }
 function toast(msg,kind){
   const t=document.createElement('div');
@@ -837,6 +867,14 @@ async function apiCall(path, opts){
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     show('publicTestView');
     return renderPublicTest();
+  }
+  // 만족도 설문도 같은 방식입니다: 로그인·설정 화면을 건너뜁니다.
+  if(location.hash.slice(1).startsWith('survey')){
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    show('surveyView');
+    // 설문 코드는 이 파일 맨 아래에 있습니다. 한 박자 쉬어 그것까지 다 읽힌 뒤에 부릅니다.
+    await 0;
+    return renderSurvey();
   }
   const cfg = getConfig();
   if(!cfg.url || !cfg.key){ show('setupView'); return; }
@@ -2689,7 +2727,8 @@ const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
-  const nav = ['grid','데이터 관리','listup','리스트업','records','전체 기록','trash','휴지통',
+  const nav = ['grid','데이터 관리','listup','리스트업','records','전체 기록','survey','만족도 설문',
+               'trash','휴지통',
                'master','상세소속','users','사용자',
                'sync','내담자 DB','upload','검사 업로드','settings','설정'];
   if(isSuper()){
@@ -2718,6 +2757,7 @@ function renderAdmin(sub){
   }
   if(sub==='grid') adminGrid();
   else if(sub==='listup') adminListUp();
+  else if(sub==='survey') adminSurvey();
   else if(sub==='trash') adminTrash();
   else if(sub==='records') adminRecords();
   else if(sub==='audit') adminAudit();
@@ -5383,8 +5423,8 @@ async function renderHome(){
   if(canManage()){
     html += `<div class="eyebrow">관리자 전용</div><div class="quick">`;
     html += qbtn('통계','기간별 집계 보기',"openTab('stats')");
-    html += qsoon('리스트업 보드','제출용 명단',
-      '리스트업 보드는 준비 중입니다. 지금은 관리 → 전체 기록에서 엑셀로 내려받을 수 있습니다.');
+    html += qbtn('리스트업 보드','제출용 명단',"openTab('admin:listup')");
+    html += qbtn('만족도 설문','지표 13번 · 설문 결과',"openTab('admin:survey')");
     html += qsoon('특수 상담 리스트','심층·긴급 상담 모아보기',
       '특수 상담 리스트는 준비 중입니다. 지금은 기록 목록에서 폼별로 볼 수 있습니다.');
     html += qsoon('신규 내담자 일괄등록','표로 한번에 등록',
@@ -8290,6 +8330,583 @@ function openDetail(i){
     ).join('');
   });
 }
+
+/* ═══════════════════════════════════════════════════
+   만족도 설문 (성과지표 13번, 60점)
+
+   지금까지는 구글 폼으로 받고 '내보니'(GAS)가 계산했습니다. 그 두 단계를
+   시모니 안으로 들여온 것입니다. patch28_survey.sql 이 필요합니다.
+
+   · 대원용 : 로그인 없이 여는 화면. 주소 끝에 #survey
+              https://teen9busy-cloud.github.io/simony1/#survey
+   · 관리자용: 관리 → 만족도 설문. 관서별·문항별·교차분석과 지표 점수.
+
+   문항 글귀는 코드가 아니라 survey_questions 표에 있습니다. 담당자가
+   해마다 설문지를 새로 만들기 때문에, 관리 화면에서 고칠 수 있게 했습니다.
+   ═══════════════════════════════════════════════════ */
+
+// 인적사항 문항 1~7. 보고서 표 III-37~43이 이 구분으로 나옵니다.
+const SV_GENDER = ['남','여'];
+const SV_AGE    = ['20~29세','30~39세','40~49세','50세 이상'];
+const SV_RANK   = ['소방사','소방교','소방장','소방위','소방경 이상','일반직·기타'];
+const SV_JOB    = ['화재진압','구조','구급','상황실','행정·기타'];
+const SV_EXP    = ['5년 미만','5~10년 미만','10~20년 미만','20년 이상'];
+const SV_SERVICE= ['스크리닝 상담','심층상담','집단상담','긴급심리지원','생애주기 상담',
+                   '24시간 콜센터','간담회·교육','기타'];
+const SV_SCALE_MAX = 10;
+
+let SV_Q = [];            // survey_questions 에서 읽어온 문항
+let SV_REGIONS = [];      // 상위지역 [{id,name}]
+let SV_ANS = {};          // 지금 고른 답
+
+/* ── 대원용 공개 화면 ─────────────────────────────────────────── */
+async function renderSurvey(){
+  const box = $('svContent');
+  box.innerHTML = `<div class="panel"><div class="empty">불러오는 중…</div></div>`;
+
+  const [{ data:regs, error:rErr }, { data:qs, error:qErr }] = await Promise.all([
+    sb.from('regions').select('id,name').is('parent_id', null),
+    sb.from('survey_questions').select('*').eq('is_active',true).order('sort_order'),
+  ]);
+  if(rErr || qErr){
+    box.innerHTML = `<div class="panel"><div class="msg bad">설문을 불러오지 못했습니다:
+      ${esc((rErr||qErr).message)}<div class="hint" style="margin-top:6px;color:inherit">
+      patch28_survey.sql 을 아직 적용하지 않았다면 먼저 적용해 주세요.</div></div></div>`;
+    return;
+  }
+  SV_REGIONS = (regs||[]).slice().sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+  SV_Q = qs||[];
+  SV_ANS = {};
+
+  const opts = list => list.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+
+  let html = `<div class="panel">
+    <h2>상담을 받으신 소감을 여쭙습니다</h2>
+    <div class="desc">이름을 적지 않는 익명 설문입니다. 누가 답했는지 알 수 없으며,
+      답해 주신 내용은 사업을 나아지게 하는 데에만 씁니다. 2~3분이면 됩니다.</div>
+
+    <div class="section-title">1~6. 응답자 정보</div>
+    <div class="grid">
+      <div class="field"><label>1. 성별<span class="req">*</span></label>
+        <select id="sv_gender"><option value="">— 선택 —</option>${opts(SV_GENDER)}</select></div>
+      <div class="field"><label>2. 연령<span class="req">*</span></label>
+        <select id="sv_age"><option value="">— 선택 —</option>${opts(SV_AGE)}</select></div>
+      <div class="field"><label>3. 직급<span class="req">*</span></label>
+        <select id="sv_rank"><option value="">— 선택 —</option>${opts(SV_RANK)}</select></div>
+      <div class="field"><label>4. 담당 업무<span class="req">*</span></label>
+        <select id="sv_job"><option value="">— 선택 —</option>${opts(SV_JOB)}</select></div>
+      <div class="field"><label>5. 근무기간<span class="req">*</span></label>
+        <select id="sv_exp"><option value="">— 선택 —</option>${opts(SV_EXP)}</select></div>
+      <div class="field"><label>6. 소속<span class="req">*</span></label>
+        <select id="sv_region" onchange="svLoadOffices()"><option value="">— 선택 —</option>
+          ${SV_REGIONS.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>소속 소방서</label>
+        <input type="text" list="sv_offices" id="sv_office"
+          placeholder="소속을 먼저 고르세요" disabled>
+        <datalist id="sv_offices"></datalist></div>
+    </div>
+  </div>`;
+
+  html += `<div class="panel">
+    <div class="section-title">7. 어떤 상담을 받으셨습니까? (해당하는 것 모두)</div>
+    <div class="chips-pick" id="sv_services">
+      ${SV_SERVICE.map(s=>`<button type="button" class="chip-opt"
+        onclick="svToggleService(this)">${esc(s)}</button>`).join('')}
+    </div>
+  </div>`;
+
+  const scale = SV_Q.filter(q=>q.kind==='scale');
+  const texts = SV_Q.filter(q=>q.kind==='text');
+
+  html += `<div class="panel">
+    <div class="section-title">아래 문항은 1점(전혀 아니다)부터 10점(매우 그렇다)까지입니다</div>
+    ${scale.map(q=>svQuestionCard(q)).join('')}
+  </div>`;
+
+  if(texts.length) html += `<div class="panel">
+    ${texts.map(q=>`<div class="field"><label>${q.no}. ${esc(q.label)}</label>
+      <textarea id="sv_${esc(q.qkey)}" rows="4"
+        placeholder="적지 않으셔도 됩니다"></textarea></div>`).join('')}
+  </div>`;
+
+  html += `<div class="panel">
+    <div class="actions"><button class="btn" id="svSave" onclick="submitSurvey()">설문 제출</button></div>
+    <div class="hint" style="text-align:center;margin-top:6px">제출 후에는 고칠 수 없습니다.</div>
+  </div>`;
+
+  box.innerHTML = html;
+}
+
+function svQuestionCard(q){
+  let btns = '';
+  for(let v=1; v<=SV_SCALE_MAX; v++){
+    btns += `<button type="button" class="qopt num"
+      onclick="svPick('${esc(q.qkey)}',${v},this)">${v}</button>`;
+  }
+  return `<div class="qcard" id="svcard_${esc(q.qkey)}">
+    <div class="qtext"><span class="qno">${q.no}</span>${esc(q.label)}</div>
+    <div class="qopts ten">${btns}</div>
+    <div class="scale-ends"><span>1 전혀 아니다</span><span>10 매우 그렇다</span></div>
+  </div>`;
+}
+function svPick(key, val, el){
+  SV_ANS[key] = val;
+  el.parentElement.querySelectorAll('.qopt').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  $('svcard_'+key).classList.remove('miss');
+}
+function svToggleService(el){ el.classList.toggle('on'); }
+async function svLoadOffices(){
+  const rid = $('sv_region').value;
+  const box = $('sv_office'), dl = $('sv_offices');
+  box.value = ''; dl.innerHTML = '';
+  if(!rid){ box.disabled = true; box.placeholder = '소속을 먼저 고르세요'; return; }
+  box.disabled = false; box.placeholder = '예: 진주소방서';
+  try{
+    const { data } = await sb.rpc('public_departments', { p_region_id: rid });
+    dl.innerHTML = (data||[]).map(d=>`<option value="${esc(d.name)}">`).join('');
+  }catch(e){ /* 목록을 못 받아도 직접 적을 수 있으므로 그냥 둡니다 */ }
+}
+
+async function submitSurvey(){
+  const btn = $('svSave');
+  document.querySelectorAll('#svContent .field').forEach(f=>f.classList.remove('err'));
+
+  const need = [['sv_gender','성별'],['sv_age','연령'],['sv_rank','직급'],
+                ['sv_job','담당 업무'],['sv_exp','근무기간'],['sv_region','소속']];
+  for(const [id,label] of need){
+    if(!$(id).value){
+      $(id).closest('.field').classList.add('err');
+      toast(label+'을(를) 골라 주세요','bad');
+      $(id).scrollIntoView({block:'center'}); return;
+    }
+  }
+  const services = [...document.querySelectorAll('#sv_services .chip-opt.on')]
+    .map(b=>b.textContent.trim());
+
+  const scale = SV_Q.filter(q=>q.kind==='scale');
+  const missing = scale.filter(q=>SV_ANS[q.qkey]===undefined);
+  document.querySelectorAll('#svContent .qcard').forEach(c=>c.classList.remove('miss'));
+  if(missing.length){
+    missing.forEach(q=>$('svcard_'+q.qkey).classList.add('miss'));
+    toast(`답하지 않은 문항이 ${missing.length}개 있습니다`,'bad');
+    $('svcard_'+missing[0].qkey).scrollIntoView({block:'center'});
+    return;
+  }
+
+  const texts = SV_Q.filter(q=>q.kind==='text');
+  const comment = texts.map(q=>($('sv_'+q.qkey)?.value||'').trim()).filter(Boolean).join('\n');
+
+  btn.disabled = true; btn.textContent = '보내는 중…';
+  const { error } = await sb.from('survey_responses').insert({
+    region_id: $('sv_region').value,
+    gender: $('sv_gender').value, age_band: $('sv_age').value,
+    rank: $('sv_rank').value, job: $('sv_job').value, exp_band: $('sv_exp').value,
+    office: $('sv_office').value.trim() || null,
+    services, scores: SV_ANS, comment: comment || null,
+  });
+  btn.disabled = false; btn.textContent = '설문 제출';
+  if(error){ toast('보내지 못했습니다: '+error.message,'bad'); return; }
+
+  $('svContent').innerHTML = `<div class="panel">
+    <h2>보내 주셔서 고맙습니다</h2>
+    <div class="desc">답해 주신 내용은 익명으로 저장되었습니다.
+      찾아가는 상담실을 더 낫게 만드는 데 쓰겠습니다.</div>
+    <div class="msg info" style="margin-top:14px;font-size:16px">
+      마음이 힘드실 때는 언제든 다시 상담을 신청하실 수 있습니다.
+      급할 때는 자살예방 상담전화 <b>109</b>번으로 24시간 연락하실 수 있습니다.</div>
+    <div class="actions"><button class="btn ghost" onclick="renderSurvey()">다른 분이 답하기</button></div>
+  </div>`;
+  window.scrollTo(0,0);
+}
+
+
+/* ── 관리자용 결과 화면 ───────────────────────────────────────── */
+let SV_DATA = null;      // 불러온 응답
+let SV_TAB  = 'office';  // office | item | cross | edit | link
+let SV_FROM = '', SV_TO = '';
+let SV_SD   = false;     // 표준편차 보이기
+
+async function adminSurvey(){
+  const box = $('adminBody');
+  box.innerHTML = '<div class="panel"><div class="empty">불러오는 중…</div></div>';
+
+  if(!SV_FROM){                       // 처음 열면 올해 전체
+    const y = new Date().getFullYear();
+    SV_FROM = y+'-01-01'; SV_TO = y+'-12-31';
+  }
+  const [{ data:qs, error:qErr }, { data:rows, error:rErr }] = await Promise.all([
+    sb.from('survey_questions').select('*').order('sort_order'),
+    sb.from('survey_responses').select('*')
+      .gte('created_at', SV_FROM+'T00:00:00')
+      .lte('created_at', SV_TO+'T23:59:59')
+      .order('created_at',{ascending:false}),
+  ]);
+  if(qErr || rErr){
+    box.innerHTML = `<div class="panel"><div class="msg bad">
+      만족도 설문 표를 읽지 못했습니다: ${esc((qErr||rErr).message)}
+      <div class="hint" style="margin-top:6px;color:inherit">
+        patch28_survey.sql 을 먼저 적용해 주세요.</div></div></div>`;
+    return;
+  }
+  SV_Q = qs||[]; SV_DATA = rows||[];
+  SV_DENOM = null;
+  renderSurveyAdmin();
+  // 분모(상담인원)는 따로 세고, 다 세면 점수판만 다시 그립니다.
+  svCountDenominator().then(()=>{ if(SV_DATA===(rows||[])) renderSurveyAdmin(); })
+    .catch(()=>{ SV_DENOM = 0; });
+}
+
+function renderSurveyAdmin(){
+  const tabs = [['office','관서별 만족도'],['item','문항별 빈도·비율'],
+                ['cross','교차분석'],['edit','문항 고치기'],['link','설문 링크']];
+  let html = `<div class="panel">
+    <h2>만족도 설문</h2>
+    <div class="desc">성과지표 13번(60점)에 쓰이는 설문입니다.
+      대원은 로그인 없이 링크로 답하고, 결과는 여기에 바로 쌓입니다.</div>
+    <div class="filter-bar">
+      <label>기간 <input type="date" id="svFrom" value="${SV_FROM}" onchange="svSetRange()"></label>
+      <label>~ <input type="date" id="svTo" value="${SV_TO}" onchange="svSetRange()"></label>
+      <span class="tag">응답 ${SV_DATA.length}명</span>
+    </div>
+    <div class="filter-bar" style="margin-top:8px">
+      ${tabs.map(([k,l])=>`<button class="btn ${SV_TAB===k?'':'ghost'}"
+        onclick="svTab('${k}')">${l}</button>`).join('')}
+    </div>
+  </div>`;
+
+  html += svScoreCard();
+  if(SV_TAB==='office')      html += svTabOffice();
+  else if(SV_TAB==='item')   html += svTabItem();
+  else if(SV_TAB==='cross')  html += svTabCross();
+  else if(SV_TAB==='edit')   html += svTabEdit();
+  else                       html += svTabLink();
+
+  $('adminBody').innerHTML = html;
+}
+function svTab(k){ SV_TAB = k; renderSurveyAdmin(); }
+function svSetRange(){
+  SV_FROM = $('svFrom').value || SV_FROM;
+  SV_TO   = $('svTo').value   || SV_TO;
+  adminSurvey();
+}
+
+/* 계산 도구 — 내보니와 같은 식을 씁니다 */
+function svHelpKeys(){ return SV_Q.filter(q=>q.is_help && q.kind==='scale').map(q=>q.qkey); }
+function svScaleQs(){ return SV_Q.filter(q=>q.kind==='scale' && q.is_active!==false); }
+function svPersonHelpAvg(r){            // 한 사람의 «도움정도 문항 평균»
+  const keys = svHelpKeys();
+  if(!keys.length) return null;
+  let sum=0, n=0;
+  keys.forEach(k=>{ const v=Number(r.scores?.[k]); if(v>0){ sum+=v; n++; } });
+  return n ? sum/n : null;
+}
+function svMean(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+function svSD(arr){                     // 표본 표준편차 (n-1). 내보니와 같습니다.
+  const n = arr.length;
+  if(n<=1) return 0;
+  const m = svMean(arr);
+  return Math.sqrt(arr.reduce((s,x)=>s+(x-m)*(x-m),0)/(n-1));
+}
+function svFix(v,d=2){ return (Math.round(v*Math.pow(10,d))/Math.pow(10,d)).toFixed(d); }
+
+/* 지표 13번 점수판 */
+function svScoreCard(){
+  const helps = SV_DATA.map(svPersonHelpAvg).filter(v=>v!==null);
+  const mean  = svMean(helps);                 // 10점 만점
+  const pct   = mean*10;                       // 산식의 ×100 (10점 만점 → 백분율)
+  const keys  = svHelpKeys();
+
+  // 실시율 분모 = 상담인원. 시모니가 이미 갖고 있는 숫자입니다.
+  const denomTxt = SV_DENOM===null ? '세는 중…' : SV_DENOM+'명';
+  const rate = (SV_DENOM && SV_DENOM>0) ? (SV_DATA.length/SV_DENOM*100) : null;
+  const band = rate===null ? null
+    : rate>=30 ? 20 : rate>=25 ? 15 : rate>=20 ? 10 : rate>=15 ? 5 : 0;
+
+  return `<div class="panel">
+    <div class="section-title">성과지표 13번 — 상담 후 설문을 통한 도움정도 측정 (60점)</div>
+    <div class="cards">
+      <div class="card"><div class="card-label">도움정도 평균 (10점 만점)</div>
+        <div class="card-value">${helps.length?svFix(mean):'—'}</div>
+        <div class="card-note">100점 환산 ${helps.length?svFix(pct,1):'—'}점 · 도움정도 문항 ${keys.length}개</div></div>
+      <div class="card"><div class="card-label">설문 실시 인원</div>
+        <div class="card-value">${SV_DATA.length}명</div>
+        <div class="card-note">기간 안에 들어온 응답</div></div>
+      <div class="card"><div class="card-label">상담인원 (분모)</div>
+        <div class="card-value">${denomTxt}</div>
+        <div class="card-note">스크리닝·심층상담·긴급심리지원 실인원</div></div>
+      <div class="card${band===0?' warn':''}"><div class="card-label">실시율 (20점)</div>
+        <div class="card-value">${rate===null?'—':svFix(rate,1)+'%'}</div>
+        <div class="card-note">${band===null?'상담인원을 세면 나옵니다':band+'점 구간'}</div></div>
+    </div>
+    <div class="hint" style="margin-top:10px">
+      실시율 배점 — 30% 이상 20점 · 25~29% 15점 · 20~24% 10점 · 15~19% 5점 · 15% 미만 0점.
+      도움정도 점수(40점)는 산식만 있고 구간표가 없어 계산값을 그대로 보여 드립니다.
+    </div>
+  </div>`;
+}
+
+/* 분모(상담인원)는 무거우므로 따로 한 번만 셉니다 */
+let SV_DENOM = null;
+async function svCountDenominator(){
+  const words = ['스크리닝','심층','긴급심리'];
+  const ids = (S.forms||[]).filter(f=>words.some(w=>String(f.title||'').includes(w))).map(f=>f.id);
+  if(!ids.length){ SV_DENOM = 0; return; }
+  const { data } = await sb.from('form_records').select('client_id')
+    .in('form_id', ids)
+    .gte('created_at', SV_FROM+'T00:00:00')
+    .lte('created_at', SV_TO+'T23:59:59')
+    .limit(20000);
+  SV_DENOM = new Set((data||[]).map(r=>r.client_id).filter(Boolean)).size;
+}
+
+/* ── 탭 1 : 관서별 만족도 (내보니 탭1) ── */
+function svTabOffice(){
+  const qs = svScaleQs().filter(q=>q.is_help);
+  const groups = {};
+  SV_DATA.forEach(r=>{
+    const k = r.office || svRegionName(r.region_id) || '미지정';
+    (groups[k] = groups[k] || []).push(r);
+  });
+  const names = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'ko'));
+
+  let head1 = `<th rowspan="2">관서명</th>`;
+  let head2 = '';
+  qs.forEach(q=>{
+    head1 += `<th colspan="${SV_SD?2:1}">문항 ${q.no}</th>`;
+    head2 += `<th>평균</th>${SV_SD?'<th>SD</th>':''}`;
+  });
+  head1 += `<th colspan="${SV_SD?2:1}">전체 평균</th><th rowspan="2">인원</th>`;
+  head2 += `<th>평균</th>${SV_SD?'<th>SD</th>':''}`;
+
+  let body = '';
+  const rowFor = (label, rows, isTotal)=>{
+    let tr = `<td class="ell">${esc(label)}</td>`;
+    qs.forEach(q=>{
+      const vals = rows.map(r=>Number(r.scores?.[q.qkey])).filter(v=>v>0);
+      tr += `<td>${vals.length?svFix(svMean(vals)):'—'}</td>`;
+      if(SV_SD) tr += `<td class="sd">${vals.length?svFix(svSD(vals)):'—'}</td>`;
+    });
+    const helps = rows.map(svPersonHelpAvg).filter(v=>v!==null);
+    tr += `<td class="hi">${helps.length?svFix(svMean(helps)):'—'}</td>`;
+    if(SV_SD) tr += `<td class="hi sd">${helps.length?svFix(svSD(helps)):'—'}</td>`;
+    tr += `<td>${rows.length}</td>`;
+    return `<tr${isTotal?' class="total"':''}>${tr}</tr>`;
+  };
+  names.forEach(n=> body += rowFor(n, groups[n]));
+  if(names.length>1) body += rowFor('전체', SV_DATA, true);
+
+  return `<div class="panel">
+    <div class="filter-bar">
+      <div class="section-title" style="margin:0;flex:1">관서별 도움정도 평균</div>
+      <label><input type="checkbox" ${SV_SD?'checked':''}
+        onchange="SV_SD=this.checked;renderSurveyAdmin()"> 표준편차 함께 보기</label>
+      <button class="btn ghost" onclick="svCopyTable('svT1')">표 복사</button>
+    </div>
+    ${SV_DATA.length ? `<div class="scroll-x"><table class="list-table lu" id="svT1">
+      <thead><tr>${head1}</tr><tr>${head2}</tr></thead>
+      <tbody>${body}</tbody></table></div>`
+    : `<div class="empty">이 기간에 들어온 응답이 없습니다.</div>`}
+    <div class="hint" style="margin-top:8px">
+      최종보고서 표 III-42(관서별 만족도)가 이 표입니다.</div>
+  </div>`;
+}
+function svRegionName(id){
+  const r = (S.allRegions||[]).find(x=>x.id===id);
+  return r ? r.name : '';
+}
+
+/* ── 탭 2 : 문항별 빈도·비율 (내보니 탭2) ── */
+function svTabItem(){
+  const qs = svScaleQs();
+  const n = SV_DATA.length;
+  let head = `<th>문항</th>`;
+  for(let v=1; v<=SV_SCALE_MAX; v++) head += `<th>${v}점</th>`;
+  head += `<th>응답</th><th>평균</th><th>SD</th>`;
+
+  let body = '';
+  qs.forEach(q=>{
+    const vals = SV_DATA.map(r=>Number(r.scores?.[q.qkey])).filter(v=>v>0);
+    let tr = `<td class="ell" title="${esc(q.label)}">${q.no}. ${esc(q.label)}
+      ${q.is_help?'<span class="tag">도움정도</span>':''}</td>`;
+    for(let v=1; v<=SV_SCALE_MAX; v++){
+      const c = vals.filter(x=>x===v).length;
+      tr += `<td>${c ? c+`<span class="pc">${Math.round(c/(vals.length||1)*100)}%</span>` : '—'}</td>`;
+    }
+    tr += `<td>${vals.length}</td><td class="hi">${vals.length?svFix(svMean(vals)):'—'}</td>
+           <td class="sd">${vals.length?svFix(svSD(vals)):'—'}</td>`;
+    body += `<tr>${tr}</tr>`;
+  });
+
+  // 자유서술
+  const comments = SV_DATA.filter(r=>(r.comment||'').trim());
+  let cbox = '';
+  if(comments.length){
+    cbox = `<div class="panel"><div class="section-title">적어 주신 말씀 (${comments.length}건)</div>
+      <div class="scroll-y" style="max-height:420px">
+      ${comments.map(r=>`<div class="quote">
+        <div class="q-meta">${esc(r.office||svRegionName(r.region_id)||'미지정')} ·
+          ${esc(r.gender||'')} ${esc(r.age_band||'')} · ${fmtDate(r.created_at)}</div>
+        <div class="q-body">${esc(r.comment)}</div></div>`).join('')}
+      </div></div>`;
+  }
+
+  return `<div class="panel">
+    <div class="filter-bar">
+      <div class="section-title" style="margin:0;flex:1">문항 점수별 빈도 분포 (응답 ${n}명)</div>
+      <button class="btn ghost" onclick="svCopyTable('svT2')">표 복사</button>
+    </div>
+    ${n ? `<div class="scroll-x"><table class="list-table lu" id="svT2">
+      <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    : `<div class="empty">이 기간에 들어온 응답이 없습니다.</div>`}
+  </div>` + cbox;
+}
+
+/* ── 탭 3 : 교차분석 (내보니 탭3) ── */
+const SV_CROSS = [
+  ['gender','성별','표 III-37'], ['age_band','연령','표 III-38'],
+  ['rank','직급','표 III-39'],   ['job','담당 업무','표 III-40'],
+  ['exp_band','근무기간','표 III-41'], ['office','관서','표 III-42'],
+  ['services','받은 상담','표 III-43'],
+];
+function svTabCross(){
+  if(!SV_DATA.length)
+    return `<div class="panel"><div class="empty">이 기간에 들어온 응답이 없습니다.</div></div>`;
+
+  let out = '';
+  SV_CROSS.forEach(([key,label,tbl])=>{
+    const groups = {};
+    SV_DATA.forEach(r=>{
+      if(key==='services'){
+        const list = Array.isArray(r.services)&&r.services.length ? r.services : ['미응답'];
+        list.forEach(s=>(groups[s]=groups[s]||[]).push(r));   // 복수응답은 겹쳐서 셉니다
+      }else{
+        const k = (r[key]||'').trim() || '미지정';
+        (groups[k]=groups[k]||[]).push(r);
+      }
+    });
+    const names = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'ko'));
+    let body = '';
+    names.forEach(nm=>{
+      const rows = groups[nm];
+      const helps = rows.map(svPersonHelpAvg).filter(v=>v!==null);
+      body += `<tr><td class="ell">${esc(nm)}</td><td>${rows.length}</td>
+        <td>${SV_DATA.length?Math.round(rows.length/SV_DATA.length*100):0}%</td>
+        <td class="hi">${helps.length?svFix(svMean(helps)):'—'}</td>
+        <td class="sd">${helps.length?svFix(svSD(helps)):'—'}</td></tr>`;
+    });
+    const all = SV_DATA.map(svPersonHelpAvg).filter(v=>v!==null);
+    body += `<tr class="total"><td>전체</td><td>${SV_DATA.length}</td><td>100%</td>
+      <td class="hi">${all.length?svFix(svMean(all)):'—'}</td>
+      <td class="sd">${all.length?svFix(svSD(all)):'—'}</td></tr>`;
+
+    out += `<div class="panel">
+      <div class="filter-bar">
+        <div class="section-title" style="margin:0;flex:1">${label}별 만족도
+          <span class="tag">${tbl}</span></div>
+        <button class="btn ghost" onclick="svCopyTable('svX_${key}')">표 복사</button>
+      </div>
+      <div class="scroll-x"><table class="list-table lu" id="svX_${key}">
+        <thead><tr><th>${esc(label)}</th><th>인원</th><th>비율</th>
+          <th>도움정도 평균</th><th>SD</th></tr></thead>
+        <tbody>${body}</tbody></table></div>
+      ${key==='services'?`<div class="hint" style="margin-top:6px">
+        복수응답이라 인원의 합이 전체보다 클 수 있습니다.</div>`:''}
+    </div>`;
+  });
+  return out;
+}
+
+/* ── 탭 4 : 문항 고치기 ── */
+function svTabEdit(){
+  const rows = SV_Q.slice().sort((a,b)=>a.sort_order-b.sort_order).map(q=>`
+    <tr>
+      <td><input type="number" value="${q.no}" style="width:56px"
+            onchange="svEditQ('${esc(q.id)}','no',this.value)"></td>
+      <td><input type="text" value="${esc(q.label)}"
+            onchange="svEditQ('${esc(q.id)}','label',this.value)"></td>
+      <td><select onchange="svEditQ('${esc(q.id)}','kind',this.value)">
+            <option value="scale"${q.kind==='scale'?' selected':''}>10점 척도</option>
+            <option value="text"${q.kind==='text'?' selected':''}>자유서술</option>
+          </select></td>
+      <td style="text-align:center"><input type="checkbox" ${q.is_help?'checked':''}
+            onchange="svEditQ('${esc(q.id)}','is_help',this.checked)"></td>
+      <td style="text-align:center"><input type="checkbox" ${q.is_active?'checked':''}
+            onchange="svEditQ('${esc(q.id)}','is_active',this.checked)"></td>
+      <td><button class="btn ghost sm" onclick="svDelQ('${esc(q.id)}')">삭제</button></td>
+    </tr>`).join('');
+
+  return `<div class="panel">
+    <div class="section-title">설문 문항</div>
+    <div class="msg info">지금 들어 있는 이름은 «내보니»가 쓰던 것을 그대로 옮긴 것입니다.
+      대원이 읽을 문장으로 늘리시려면 여기서 고치세요. 고치면 대원 화면에 바로 반영됩니다.
+      <div class="hint" style="margin-top:6px;color:inherit">
+        «도움정도»에 표시한 문항들의 평균이 성과지표 13번 점수가 됩니다.
+        이미 받은 응답의 점수는 문구를 바꿔도 그대로 남습니다.</div></div>
+    <div class="scroll-x"><table class="list-table">
+      <thead><tr><th>번호</th><th>문항</th><th>종류</th><th>도움정도</th><th>사용</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="actions"><button class="btn ghost" onclick="svAddQ()">문항 추가</button></div>
+  </div>`;
+}
+async function svEditQ(id, col, val){
+  const patch = {}; patch[col] = (col==='no') ? Number(val) : val;
+  if(col==='no') patch.sort_order = Number(val);
+  const { error } = await sb.from('survey_questions').update(patch).eq('id', id);
+  if(error){ toast('고치지 못했습니다: '+error.message,'bad'); return; }
+  const q = SV_Q.find(x=>x.id===id); if(q) Object.assign(q, patch);
+  toast('저장했습니다');
+}
+async function svAddQ(){
+  const maxNo = Math.max(0, ...SV_Q.map(q=>q.no||0));
+  const { error } = await sb.from('survey_questions').insert({
+    qkey: 'q'+Date.now().toString(36), no: maxNo+1, kind:'scale',
+    label:'새 문항', is_help:false, is_active:true, sort_order:maxNo+1 });
+  if(error){ toast('추가하지 못했습니다: '+error.message,'bad'); return; }
+  adminSurvey();
+}
+async function svDelQ(id){
+  const q = SV_Q.find(x=>x.id===id);
+  if(!confirm(`«${q?.label||''}» 문항을 지울까요?\n이미 받은 응답의 점수는 남지만 표에서 사라집니다.`)) return;
+  const { error } = await sb.from('survey_questions').delete().eq('id', id);
+  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
+  adminSurvey();
+}
+
+/* ── 탭 5 : 설문 링크 ── */
+function svTabLink(){
+  const url = location.origin + location.pathname + '#survey';
+  const qr  = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(url);
+  return `<div class="panel">
+    <div class="section-title">대원에게 보낼 주소</div>
+    <div class="desc">이 주소를 열면 로그인 없이 바로 설문 화면이 뜹니다.
+      문자·공지·큐알 어느 쪽으로 돌려도 됩니다.</div>
+    <div class="filter-bar">
+      <input type="text" id="svUrl" value="${esc(url)}" readonly style="flex:1;min-width:260px">
+      <button class="btn" onclick="svCopyUrl()">주소 복사</button>
+    </div>
+    <div style="text-align:center;margin-top:16px">
+      <img src="${esc(qr)}" alt="설문 큐알코드" style="width:220px;height:220px;border:1px solid var(--line);border-radius:var(--radius)">
+      <div class="hint" style="margin-top:6px">큐알 그림은 오른쪽 눌러 저장할 수 있습니다.</div>
+    </div>
+  </div>`;
+}
+function svCopyUrl(){
+  const el = $('svUrl'); el.select();
+  navigator.clipboard?.writeText(el.value).then(()=>toast('주소를 복사했습니다'))
+    .catch(()=>toast('직접 복사해 주세요','bad'));
+}
+function svCopyTable(id){
+  const t = document.getElementById(id);
+  if(!t){ toast('복사할 표가 없습니다','bad'); return; }
+  const lines = [...t.querySelectorAll('tr')].map(tr =>
+    [...tr.querySelectorAll('th,td')].map(c=>c.innerText.replace(/\s+/g,' ').trim()).join('\t'));
+  navigator.clipboard?.writeText(lines.join('\n'))
+    .then(()=>toast('표를 복사했습니다. 한글·엑셀에 붙여넣으세요'))
+    .catch(()=>toast('복사하지 못했습니다','bad'));
+}
+
 </script>
 </body>
 </html>
