@@ -429,6 +429,12 @@ table.list-table tbody tr:hover{background:var(--accent-soft)}
 /* 긴 이름이 두 줄로 접혀 줄 높이가 들쭉날쭉해지지 않게, 넘치면 …로 줄입니다.
    (전체 이름은 마우스를 올리면 뜹니다) */
 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 리스트업 보드는 칸이 스무 개가 넘습니다. 폭에 맞춰 눌러 담으면 '구·경·진'처럼
+   한 글자씩 접혀 못 읽게 되므로, 내용만큼 넓게 펴고 옆으로 밀어 보게 합니다. */
+.scroll-x table.lu{min-width:max-content}
+table.lu th,table.lu td{white-space:nowrap}
+table.lu td input[type="text"]{width:130px;padding:4px 7px;font-size:14.5px}
+table.lu td select{padding:4px 7px;font-size:14.5px}
 
 /* 게시판 — 오래 읽는 글이므로 본문을 크고 넉넉하게 둡니다 */
 .post-body{white-space:pre-wrap;font-size:18px;line-height:1.9;margin-top:18px;
@@ -645,7 +651,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-02 내담자표';
+const APP_VERSION = '2026-09-03 리스트업';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -2524,6 +2530,7 @@ async function renderList(){
     <button class="btn ghost" onclick="printPickAll(true)">보이는 것 전체 선택</button>
     <button class="btn ghost" onclick="printPickAll(false)">선택 해제</button>
     <button class="btn" onclick="printPicked()">선택한 기록 인쇄</button>
+    <button class="btn" onclick="openHwpxExport()">한글 보고서로 내보내기</button>
     <button class="btn ghost" style="color:var(--warn);border-color:var(--warn)"
       onclick="trashPicked()">선택한 기록 지우기</button>
   </div>
@@ -2642,7 +2649,7 @@ const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 function renderAdmin(sub){
   // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
-  const nav = ['grid','데이터 관리','records','전체 기록','trash','휴지통',
+  const nav = ['grid','데이터 관리','listup','리스트업','records','전체 기록','trash','휴지통',
                'master','상세소속','users','사용자',
                'sync','내담자 DB','upload','검사 업로드','settings','설정'];
   if(isSuper()){
@@ -2670,6 +2677,7 @@ function renderAdmin(sub){
     return;
   }
   if(sub==='grid') adminGrid();
+  else if(sub==='listup') adminListUp();
   else if(sub==='trash') adminTrash();
   else if(sub==='records') adminRecords();
   else if(sub==='audit') adminAudit();
@@ -2680,6 +2688,588 @@ function renderAdmin(sub){
   else if(sub==='upload') adminUpload();
   else if(sub==='settings') adminSettings();
   else adminUsers();
+}
+
+/* ═══════════════════════════════════════════════════
+   리스트업 보드 — 제출용 명단 만들기
+
+   구 시모니 0.5의 ListUp을 옮겨 온 것입니다. 세 가지 명단을 만듭니다.
+     ① 제출 양식(주무관)  — 20칸 고정. 상담결과·만족도·비고는 화면에서 손으로 채웁니다.
+     ② 맞춤 리스트        — 필요한 칸만 골라서. 고른 순서대로 칸이 섭니다.
+     ③ 더심온 월별 보고   — 한 사람의 상담 기록을 옆으로 죽 펼칩니다(최대 13건).
+   만든 표는 엑셀 파일로 받거나, 표 그대로 복사해 엑셀에 붙여 넣을 수 있습니다.
+
+   0.5와 달라진 곳 — 상담 대분류
+     0.5는 기록마다 '대분류' 칸이 따로 있었지만, 1.0은 **폼 자체가 대분류**입니다
+     (스크리닝 / 심층상담 / 생애주기 상담 / 긴급심리지원 / 긴급콜 / 대형재난 / 집단상담).
+     그래서 폼 제목에서 대분류를 읽습니다. 폼 이름을 바꿔도 낱말로 찾으므로 따라옵니다.
+   ═══════════════════════════════════════════════════ */
+
+// 폼 제목 → 상담 대분류. 위에 적은 것부터 맞춰 봅니다('긴급콜'이 '긴급'보다 먼저).
+const LU_TYPES = [
+  ['스크리닝', /스크리닝/],
+  ['심층',     /심층/],
+  ['긴급콜',   /긴급\s*콜/],
+  ['생애',     /생애/],
+  ['긴급',     /긴급/],
+  ['재난',     /재난|재해/],
+  ['집단',     /집단/],
+];
+function luTypeOf(title){
+  const t = String(title||'');
+  for(const [name, re] of LU_TYPES) if(re.test(t)) return name;
+  return '기타';
+}
+// 폼 항목 중에서 쓰임새에 맞는 것을 이름으로 찾습니다 (폼마다 항목 이름이 다르므로)
+const LU_FIELD_WORDS = {
+  sub: /소분류|하위\s*구분|세부|구분/,
+  act: /조치|연계|처리|결과/,
+  mth: /형태|방법|유형/,
+  dur: /소요|상담\s*시간|진행\s*시간|시간\(분\)/,
+};
+function luPickField(fields, kind){
+  const re = LU_FIELD_WORDS[kind];
+  const ok = (fields||[]).filter(f=>re.test(String(f.label||'')));
+  if(kind==='dur') return ok.find(f=>f.field_type==='number') || ok[0] || null;
+  return ok.find(f=>['select','text'].includes(f.field_type)) || ok[0] || null;
+}
+
+const LU_MAX_CLIENTS = 3000;   // 한 번에 다루는 사람 수 상한 (넘으면 알려 줍니다)
+const LU_MAX_RECS = 13;        // 더심온 월별 보고에 펼치는 기록 수
+
+async function adminListUp(){
+  const box = $('adminBody');
+  const rname = {}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
+  const regs = (S.regions||[]).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const thisYear = new Date().getFullYear();
+
+  box.innerHTML = `<div class="panel">
+    <h2>리스트업 보드 <span class="cnt" id="luCnt"></span></h2>
+    <div class="desc">제출용 명단을 만듭니다. 조건을 고르고 «명단 불러오기»를 누르세요.
+      만든 표는 엑셀로 받거나 그대로 복사해 붙여 넣을 수 있습니다.</div>
+
+    <div class="filter-bar">
+      <select id="luRegion">
+        <option value="">전체(권한 있는 지역)</option>
+        ${regs.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}
+      </select>
+      <select id="luYear">
+        <option value="">전체 연도</option>
+        ${[0,1,2,3].map(i=>{const y=thisYear-i;
+          return `<option value="${y}" ${i===0?'selected':''}>${y}년</option>`;}).join('')}
+      </select>
+      <select id="luFrom"><option value="">시작 월</option>
+        ${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}월</option>`).join('')}</select>
+      <select id="luTo"><option value="">끝 월</option>
+        ${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}월</option>`).join('')}</select>
+      <button class="btn" onclick="loadListUp(this)">명단 불러오기</button>
+    </div>
+    <div id="luBody"><div class="empty">조건을 고르고 «명단 불러오기»를 누르세요.<br>
+      <span class="hint">기간을 고르면 그 기간의 상담만 세어 표를 만듭니다.
+        기간을 비우면 전체 기록으로 셉니다.</span></div></div>
+  </div>`;
+}
+
+/* 자료 모으기 — 명부 → 그 사람들의 상담기록·검사 */
+async function loadListUp(btn){
+  const body = $('luBody');
+  if(btn){ btn.disabled = true; btn.textContent = '불러오는 중…'; }
+  body.innerHTML = '<div class="empty">불러오는 중… 사람이 많으면 20초쯤 걸립니다.</div>';
+  try{
+    const regionId = $('luRegion').value;
+
+    let q = sb.from('clients').select('*').order('name');
+    if(regionId) q = q.eq('region_id', regionId);
+    const { data: clients, error } = await q.limit(LU_MAX_CLIENTS);
+    if(error) throw error;
+
+    const ids = (clients||[]).map(c=>c.id);
+    let recs = [], tests = [], comps = [];
+    if(ids.length){
+      // 사람이 많으면 in(...) 목록이 너무 길어지므로 500명씩 나눠 묻습니다
+      const chunks = [];
+      for(let i=0;i<ids.length;i+=500) chunks.push(ids.slice(i,i+500));
+      for(const part of chunks){
+        const [a,b,c] = await Promise.all([
+          sb.from('form_records').select('*').in('client_id', part).limit(20000),
+          sb.from('simple_tests').select('client_id,tested_at,ptsd_score,dep_score,suicide_risk')
+            .in('client_id', part).order('tested_at',{ascending:false}).limit(20000),
+          sb.from('comp_tests').select('client_id').in('client_id', part).limit(20000),
+        ]);
+        recs = recs.concat(a.data||[]);
+        tests = tests.concat(b.data||[]);
+        comps = comps.concat(c.data||[]);
+      }
+    }
+
+    // 폼마다 어느 항목이 소분류·조치·방법·시간인지 한 번만 찾아 둡니다
+    const { data: allFields } = await sb.from('form_fields').select('*').limit(2000);
+    const byForm = {};
+    (allFields||[]).forEach(f=>{ (byForm[f.form_id] = byForm[f.form_id] || []).push(f); });
+    const formInfo = {};
+    (S.forms||[]).forEach(f=>{
+      const ff = byForm[f.id] || [];
+      formInfo[f.id] = {
+        title: f.title,
+        type: luTypeOf(f.title),
+        date: ff.find(x=>x.field_type==='date') || null,
+        sub: luPickField(ff,'sub'), act: luPickField(ff,'act'),
+        mth: luPickField(ff,'mth'), dur: luPickField(ff,'dur'),
+      };
+    });
+
+    // 기록을 사람별로 모읍니다
+    const val = (rec, f) => {
+      if(!f) return '';
+      const v = rec.data?.[f.field_key];
+      return Array.isArray(v) ? v.join(', ') : (v==null ? '' : String(v));
+    };
+    const byClient = {};
+    (recs||[]).forEach(r=>{
+      const fi = formInfo[r.form_id] || { type:'기타' };
+      const ds = String(val(r, fi.date) || r.created_at || '').slice(0,10);
+      const [y,m,d] = ds.split('-').map(n=>parseInt(n,10));
+      (byClient[r.client_id] = byClient[r.client_id] || []).push({
+        s: (y&&m&&d) ? y*10000+m*100+d : 0, y: y||0, m: m||0,
+        t: fi.type, form: fi.title,
+        sub: val(r, fi.sub), act: val(r, fi.act),
+        mth: val(r, fi.mth), dur: val(r, fi.dur),
+        who: r.author_name || '',
+      });
+    });
+    Object.values(byClient).forEach(list=>list.sort((a,b)=>a.s-b.s));
+
+    const lastTest = {};
+    tests.forEach(t=>{ if(!lastTest[t.client_id]) lastTest[t.client_id] = t; });
+    const hasComp = {}; comps.forEach(c=>{ hasComp[c.client_id] = true; });
+    const rname = {}; (S.allRegions||S.regions).forEach(r=>rname[r.id]=r.name);
+
+    S._lu = {
+      members: (clients||[]).map(c=>({
+        id: c.id, name: c.name || '', birth: c.birth_date || '',
+        gender: c.gender || '', station: rname[c.region_id] || '',
+        dept: c.extra?.department || '', rank: c.extra?.rank || '',
+        internalId: c.personal_id || c.internal_id || '',
+        status: c.status || '재직',
+        records: byClient[c.id] || [],
+        scores: lastTest[c.id]
+          ? { p:lastTest[c.id].ptsd_score, u:lastTest[c.id].dep_score, s:lastTest[c.id].suicide_risk }
+          : null,
+        hasComp: !!hasComp[c.id],
+        counselors: [...new Set((byClient[c.id]||[]).map(r=>r.who).filter(Boolean))],
+      })),
+      truncated: (clients||[]).length >= LU_MAX_CLIENTS,
+      edits: S._lu?.edits || {},
+      tab: S._lu?.tab || 1,
+      cols: S._lu?.cols || ['no','station','dept','rank','name','birth','gender','cnt','last'],
+    };
+    renderListUpBody();
+  }catch(e){
+    body.innerHTML = `<div class="msg bad">불러오지 못했습니다: ${esc(e.message||String(e))}</div>`;
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '명단 불러오기'; }
+  }
+}
+
+/* 기간을 적용한 사람 목록 */
+function luFiltered(){
+  const L = S._lu; if(!L) return [];
+  const y = parseInt($('luYear')?.value||'', 10);
+  const f = parseInt($('luFrom')?.value||'', 10);
+  const t = parseInt($('luTo')?.value||'', 10);
+  const st = $('luStation')?.value || '';
+  const kw = ($('luName')?.value||'').replace(/\s+/g,'');
+  const onlyActive = !!$('luActive')?.checked;
+  const narrowed = !!(y || f || t);
+  let from = f||1, to = t||12;
+  if(from > to){ const x=from; from=to; to=x; }      // 거꾸로 골라도 알아서 바로잡습니다
+
+  const out = [];
+  for(const m of L.members){
+    if(st && m.station !== st) continue;
+    if(kw && m.name.replace(/\s+/g,'').indexOf(kw) === -1) continue;
+    if(!narrowed){ out.push(m); continue; }
+    const recs = m.records.filter(r=>{
+      if(y && r.y !== y) return false;
+      if(!r.m) return false;
+      return r.m >= from && r.m <= to;
+    });
+    if(onlyActive && !recs.length) continue;
+    out.push({ ...m, records: recs });
+  }
+  return out;
+}
+
+/* ── 사람 하나에서 뽑아내는 값들 (0.5와 같은 규칙) ── */
+const luFirst = m => m.records.length ? m.records[0] : null;
+const luLast  = m => m.records.length ? m.records[m.records.length-1] : null;
+function luDate(r){
+  if(!r || !r.s) return '';
+  const s=r.s;
+  return `${Math.floor(s/10000)}-${String(Math.floor((s%10000)/100)).padStart(2,'0')}-${String(s%100).padStart(2,'0')}`;
+}
+const luHasType = (m,t) => m.records.some(r=>r.t===t);
+const luIndepth = m => m.records.filter(r=>r.t==='심층').length;
+const luHospital = m => m.records.some(r=>/치료연계/.test(r.act||''));
+// 치료·전문기관 연계 조치가 있거나 심층 이력이 있으면 '추가상담권유'
+function luAutoResult(m){
+  if(!m.records.length) return '';
+  const need = m.records.some(r=>/치료연계|전문기관연계/.test(r.act||'') || r.t==='심층');
+  return need ? '추가상담권유' : '양호';
+}
+function luStatus(result){
+  if(!result) return '미실시';
+  return (result==='추가상담권유' || result==='전문상담연계') ? '완료(연계)' : '완료(양호)';
+}
+function luMethod(m){
+  const r = luFirst(m); if(!r) return '';
+  const t = String(r.mth||''); if(!t) return '';
+  if(/대면/.test(t) && !/비대면/.test(t)) return '대면';
+  return /전화|화상|비대면|메신저|온라인/.test(t) ? '비대면' : '대면';
+}
+// 계급 글자 → 더심온 코드
+function luRankCode(r){
+  r = String(r||''); if(!r) return '';
+  if(r.includes('준감')) return '8';
+  if(/소방감|정감|총감/.test(r)) return '9';
+  if(r.includes('소방정')) return '7';
+  if(r.includes('소방령')) return '6';
+  if(r.includes('소방경')) return '5';
+  if(r.includes('소방위')) return '4';
+  if(r.includes('소방장')) return '3';
+  if(r.includes('소방교')) return '2';
+  if(r.includes('소방사')) return '1';
+  if(/사회복무|보조/.test(r)) return '10';
+  return '11';
+}
+// 상담 기록 → 더심온 상담분류 코드
+function luCatCode(r){
+  const t=r.t||'', sub=r.sub||'';
+  if(t==='스크리닝') return '1';
+  if(t==='심층') return '2';
+  if(t==='긴급콜' || /긴급콜/.test(sub)) return '3';
+  if(t==='긴급') return '4';
+  if(t==='생애'){
+    if(/승진/.test(sub)) return '5-1';
+    if(/임용/.test(sub)) return '5-2';
+    if(/퇴직/.test(sub)) return '5-3';
+    if(/복직/.test(sub)) return '5-4';
+    if(/휴직/.test(sub)) return '5-5';
+    return '5-1';
+  }
+  if(t==='재난') return '6';
+  if(t==='집단') return /긴급/.test(sub) ? '7' : '8';
+  return '9';
+}
+
+/* ── 화면 ── */
+function renderListUpBody(){
+  const L = S._lu; const body = $('luBody'); if(!L || !body) return;
+  const stations = [...new Set(L.members.map(m=>m.station).filter(Boolean))].sort();
+  body.innerHTML = `
+    ${L.truncated ? `<div class="msg bad">사람이 ${LU_MAX_CLIENTS.toLocaleString()}명을 넘어
+      앞의 ${LU_MAX_CLIENTS.toLocaleString()}명만 담았습니다. 위에서 지역을 좁혀 주세요.</div>` : ''}
+    <div class="filter-bar">
+      ${[[1,'① 제출 양식 (주무관)'],[2,'② 맞춤 리스트'],[3,'③ 더심온 월별 보고']]
+        .map(([n,t])=>`<button class="btn${L.tab===n?'':' ghost'}"
+          onclick="S._lu.tab=${n};renderListUpBody()">${t}</button>`).join('')}
+    </div>
+    <div class="filter-bar">
+      <select id="luStation" onchange="renderListUpRows()">
+        <option value="">전체 관서</option>
+        ${stations.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+      </select>
+      <input type="text" id="luName" placeholder="이름으로 찾기" oninput="renderListUpRows()"
+        style="min-width:150px">
+      <label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer">
+        <input type="checkbox" id="luActive" onchange="renderListUpRows()"> 그 기간에 상담한 사람만</label>
+      ${L.tab===1?`<select id="luStatus" onchange="renderListUpRows()">
+        <option value="">상태 전체</option><option value="done">완료만</option>
+        <option value="none">미실시만</option></select>`:''}
+      <button class="btn ghost" style="margin-left:auto" onclick="luCopy()">표 복사</button>
+      <button class="btn" onclick="luXlsx(this)">엑셀로 받기</button>
+    </div>
+    ${L.tab===2?`<div class="msg info" style="margin-bottom:10px">
+      아래 항목을 눌러 칸을 넣고 뺍니다. <b>누른 순서대로</b> 칸이 섭니다.
+      <div class="files" id="luPool" style="margin-top:10px"></div></div>`:''}
+    <div class="scroll-x"><div id="luRows"></div></div>`;
+  renderListUpRows();
+}
+
+/* 탭2에서 고를 수 있는 칸 */
+const LU_FIELDS = [
+  ['no','순번',        (m,i)=>i+1],
+  ['station','관서',   m=>m.station],
+  ['dept','부서',      m=>m.dept],
+  ['rank','계급',      m=>m.rank],
+  ['rankCode','계급코드', m=>luRankCode(m.rank)],
+  ['name','성명',      m=>m.name],
+  ['birth','생년월일', m=>m.birth],
+  ['birth6','생년월일(6자리)', m=>String(m.birth||'').replace(/-/g,'').slice(2,8)],
+  ['gender','성별',    m=>m.gender],
+  ['id','개인식별아이디', m=>m.internalId],
+  ['cnt','상담횟수',   m=>m.records.length||''],
+  ['first','첫 상담일', m=>luDate(luFirst(m))],
+  ['last','최근 상담일', m=>luDate(luLast(m))],
+  ['scr','스크리닝 여부', m=>luHasType(m,'스크리닝')?'여':''],
+  ['indepth','심층 회기수', m=>luIndepth(m)||''],
+  ['life','생애주기 여부', m=>luHasType(m,'생애')?'여':''],
+  ['em','긴급 여부',   m=>luHasType(m,'긴급')||luHasType(m,'긴급콜')?'여':''],
+  ['grp','집단상담 횟수', m=>m.records.filter(r=>r.t==='집단').length||''],
+  ['hosp','병원연계 여부', m=>luHospital(m)?'여':''],
+  ['ptsd','PTSD',      m=>m.scores?m.scores.p:''],
+  ['dep','우울',       m=>m.scores?m.scores.u:''],
+  ['sui','자살위험',   m=>m.scores?m.scores.s:''],
+  ['comp','종합검사 여부', m=>m.hasComp?'여':''],
+  ['counsel','담당 상담사', m=>m.counselors.join(', ')],
+  ['result','상담결과(자동)', m=>luAutoResult(m)],
+  ['status','상태(자동)', m=>luStatus(luAutoResult(m))],
+  ['emp','재직 상태',  m=>m.status],
+];
+
+const LU_TAB1_HEADERS = ['번호','관서(실국본부)','부서','계급','성명','생년월일','성별',
+  '상담일자(1차)','상담방법','상담시간(분)','상담결과','심층상담 연계여부','심층상담 회기수',
+  '병원연계(권고)','만족도설문 완료','긴급심리 지원여부','생애주기 상담대상',
+  '종합심리 검사대상','비고','상태'];
+
+function luTab1Row(m, idx, ed){
+  const fr = luFirst(m);
+  const result = ed.result !== undefined ? ed.result : luAutoResult(m);
+  const n = luIndepth(m);
+  return [ idx+1, m.station, m.dept, m.rank, m.name, m.birth, m.gender,
+    luDate(fr), luMethod(m), fr ? (fr.dur||'') : '',
+    result, n>0?'여':'', n>0?n:'', luHospital(m)?'여':'',
+    ed.satisfy||'', (luHasType(m,'긴급')||luHasType(m,'긴급콜'))?'여':'',
+    luHasType(m,'생애')?'여':'', m.hasComp?'여':'', ed.memo||'', luStatus(result) ];
+}
+
+function renderListUpRows(){
+  const L = S._lu, box = $('luRows'); if(!L || !box) return;
+  const list = luFiltered();
+  const cnt = $('luCnt');
+
+  if(L.tab === 2){
+    const pool = $('luPool');
+    if(pool) pool.innerHTML = LU_FIELDS.map(([k,label])=>{
+      const pos = L.cols.indexOf(k);
+      return `<span class="file-chip" style="cursor:pointer;${pos>-1
+        ? 'background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700':''}"
+        onclick="luToggleCol('${k}')">${pos>-1?`<b>${pos+1}</b> `:''}${esc(label)}</span>`;
+    }).join('');
+    const defs = L.cols.map(k=>LU_FIELDS.find(f=>f[0]===k)).filter(Boolean);
+    if(cnt) cnt.textContent = `${list.length}명 × ${defs.length}칸`;
+    if(!defs.length){ box.innerHTML = '<div class="empty">위에서 항목을 눌러 칸을 넣어 주세요.</div>'; return; }
+    box.innerHTML = luTableHTML(defs.map(d=>d[1]),
+      list.map((m,i)=>defs.map(d=>d[2](m,i))));
+    return;
+  }
+
+  if(L.tab === 1){
+    const filt = $('luStatus')?.value || '';
+    const rows = []; let n = 0;
+    list.forEach((m,i)=>{
+      const key = m.id;
+      const ed = L.edits[key] || {};
+      const result = ed.result !== undefined ? ed.result : luAutoResult(m);
+      const st = luStatus(result);
+      if(filt==='done' && st==='미실시') return;
+      if(filt==='none' && st!=='미실시') return;
+      rows.push({ m, key, ed, vals: luTab1Row(m, n++, ed), st });
+    });
+    if(cnt) cnt.textContent = `${rows.length}명`;
+    const sel = (key, field, cur, opts) => `<select onchange="luEdit('${key}','${field}',this.value)">`
+      + opts.map(o=>`<option value="${esc(o)}" ${o===cur?'selected':''}>${esc(o||'(없음)')}</option>`).join('')
+      + `</select>`;
+    box.innerHTML = `<table class="list-table lu"><thead><tr>${
+      LU_TAB1_HEADERS.map(h=>`<th class="nowrap">${esc(h)}</th>`).join('')
+    }</tr></thead><tbody>${rows.map(({key,ed,vals,st})=>`<tr>
+      ${vals.slice(0,10).map((v,i)=>`<td class="${i===0?'num':''}">${esc(v)}</td>`).join('')}
+      <td>${sel(key,'result', vals[10], ['','양호','추가상담권유','전문상담연계'])}</td>
+      <td class="num">${esc(vals[11])}</td><td class="num">${esc(vals[12])}</td>
+      <td class="num">${esc(vals[13])}</td>
+      <td>${sel(key,'satisfy', ed.satisfy||'', ['','완료'])}</td>
+      <td class="num">${esc(vals[15])}</td><td class="num">${esc(vals[16])}</td>
+      <td class="num">${esc(vals[17])}</td>
+      <td><input type="text" value="${esc(ed.memo||'')}" style="width:120px"
+        onchange="luEdit('${key}','memo',this.value)"></td>
+      <td class="nowrap"><span class="tag${st==='미실시'?' risk':''}">${esc(st)}</span></td>
+    </tr>`).join('')}</tbody></table>`;
+    return;
+  }
+
+  // 탭3 — 더심온 월별 보고
+  if(cnt) cnt.textContent = `${list.length}명`;
+  box.innerHTML = luTableHTML(luTab3Headers(), luTab3Rows(list));
+}
+
+function luToggleCol(k){
+  const c = S._lu.cols, i = c.indexOf(k);
+  if(i>-1) c.splice(i,1); else c.push(k);
+  renderListUpRows();
+}
+function luEdit(key, field, value){
+  const e = S._lu.edits;
+  (e[key] = e[key] || {})[field] = value;
+  if(field==='result') renderListUpRows();   // 상태 칸이 따라 바뀝니다
+}
+
+function luTab3Headers(){
+  const h = ['관리번호','관서(부서)','성명','계급','생년월일','PTSD','우울','자살위험'];
+  for(let i=1;i<=LU_MAX_RECS;i++) h.push(`기록${i} 상담월`, `기록${i} 상담일`, `기록${i} 상담분류`);
+  return h;
+}
+function luTab3Rows(list){
+  return list.map(m=>{
+    const row = [ m.internalId, [m.station, m.dept].filter(Boolean).join(' '), m.name, m.rank,
+      m.birth, m.scores?m.scores.p:'', m.scores?m.scores.u:'', m.scores?m.scores.s:'' ];
+    for(let i=0;i<LU_MAX_RECS;i++){
+      const r = m.records[i];
+      row.push(r?r.m:'', r?(r.s%100):'', r?luCatCode(r):'');
+    }
+    return row;
+  });
+}
+
+function luTableHTML(headers, rows){
+  if(!rows.length) return '<div class="empty">조건에 맞는 사람이 없습니다.</div>';
+  return `<table class="list-table lu"><thead><tr>${
+    headers.map(h=>`<th class="nowrap">${esc(h)}</th>`).join('')
+  }</tr></thead><tbody>${rows.map(r=>`<tr>${
+    r.map((v,i)=>`<td class="${i===0?'num':''}">${esc(v)}</td>`).join('')
+  }</tr>`).join('')}</tbody></table>`;
+}
+
+/* 지금 화면의 표를 그대로 2차원 배열로 (복사·엑셀이 함께 씁니다) */
+function luAoa(){
+  const L = S._lu; if(!L) return null;
+  const list = luFiltered();
+  if(L.tab === 2){
+    const defs = L.cols.map(k=>LU_FIELDS.find(f=>f[0]===k)).filter(Boolean);
+    if(!defs.length) return null;
+    return { name:'맞춤리스트',
+             rows:[defs.map(d=>d[1])].concat(list.map((m,i)=>defs.map(d=>d[2](m,i)))) };
+  }
+  if(L.tab === 1){
+    const filt = $('luStatus')?.value || '';
+    const rows = [LU_TAB1_HEADERS]; let n = 0;
+    list.forEach(m=>{
+      const ed = L.edits[m.id] || {};
+      const result = ed.result !== undefined ? ed.result : luAutoResult(m);
+      const st = luStatus(result);
+      if(filt==='done' && st==='미실시') return;
+      if(filt==='none' && st!=='미실시') return;
+      rows.push(luTab1Row(m, n++, ed));
+    });
+    return { name:'제출양식', rows };
+  }
+  return { name:'더심온월별보고', rows:[luTab3Headers()].concat(luTab3Rows(list)) };
+}
+
+function luCopy(){
+  const a = luAoa();
+  if(!a){ toast('먼저 칸을 골라 주세요','bad'); return; }
+  const tsv = a.rows.map(r=>r.map(v=>String(v==null?'':v)
+    .replace(/\t/g,' ').replace(/\n/g,' ')).join('\t')).join('\n');
+  const ta = document.createElement('textarea');
+  ta.value = tsv; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
+  ta.remove();
+  toast(ok ? '복사했습니다. 엑셀에서 Ctrl+V로 붙여 넣으세요.' : '복사하지 못했습니다 (브라우저가 막았습니다)',
+        ok ? '' : 'bad');
+}
+
+// 엑셀을 만드는 도구는 무거우므로 받을 때 한 번만 가져옵니다
+const EXCELJS_URLS = [
+  'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+];
+function ensureExcelJS(i){
+  if(window.ExcelJS) return Promise.resolve();
+  i = i || 0;
+  if(i >= EXCELJS_URLS.length){
+    return Promise.reject(new Error('엑셀 만드는 도구를 받지 못했습니다. 인터넷 연결을 확인해 주세요.'));
+  }
+  return new Promise((ok,bad)=>{
+    const s=document.createElement('script'); s.src=EXCELJS_URLS[i];
+    s.onload=()=>ok(); s.onerror=()=>bad(new Error('next'));
+    document.head.appendChild(s);
+  }).catch(()=>ensureExcelJS(i+1));
+}
+
+async function luXlsx(btn){
+  const a = luAoa();
+  if(!a){ toast('먼저 칸을 골라 주세요','bad'); return; }
+  if(btn){ btn.disabled = true; btn.textContent = '만드는 중…'; }
+  try{
+    await ensureExcelJS();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(a.name, { views:[{ state:'frozen', ySplit:1 }] });
+    const headers = a.rows[0], ncol = headers.length;
+    const statusIdx = headers.indexOf('상태');
+    const leftLabels = ['부서','관서(실국본부)','관서(부서)','계급','성명','상담결과','담당 상담사','비고'];
+    const statusStyle = {
+      '완료(양호)': { fill:'E4F3E4', font:'1E7A34' },
+      '완료(연계)': { fill:'FFF3D6', font:'9A6A00' },
+      '미실시':     { fill:'FBE2E2', font:'B32222' },
+    };
+    const thin = { style:'thin', color:{ argb:'FFBFC7D1' } };
+    const borderAll = { top:thin, left:thin, bottom:thin, right:thin };
+
+    a.rows.forEach((r, ri)=>{
+      const row = ws.addRow(r);
+      row.eachCell({ includeEmpty:true }, (cell, ci)=>{
+        cell.border = borderAll;
+        if(ri === 0){
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1F4E78' } };
+          cell.font = { name:'맑은 고딕', size:10, bold:true, color:{ argb:'FFFFFFFF' } };
+          cell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+        }else{
+          const left = leftLabels.includes(headers[ci-1]);
+          cell.font = { name:'맑은 고딕', size:10, color:{ argb:'FF222222' } };
+          cell.alignment = { horizontal:left?'left':'center', vertical:'middle', wrapText:true };
+          if(ri % 2 === 1) cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF2F6FB' } };
+        }
+      });
+      row.height = ri === 0 ? 34 : 20;
+      if(ri > 0 && statusIdx > -1){
+        const st = statusStyle[r[statusIdx]];
+        if(st){
+          const c = row.getCell(statusIdx+1);
+          c.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF'+st.fill } };
+          c.font = { name:'맑은 고딕', size:10, bold:true, color:{ argb:'FF'+st.font } };
+        }
+      }
+    });
+
+    // 열 너비 — 한글은 두 칸으로 세어야 잘리지 않습니다
+    for(let col=1; col<=ncol; col++){
+      let w = 6;
+      a.rows.forEach(r=>{
+        const v = r[col-1];
+        if(v==null) return;
+        const len = String(v).split('').reduce((s,ch)=>s + (ch.charCodeAt(0)>127?2:1), 0);
+        if(len > w) w = len;
+      });
+      ws.getColumn(col).width = Math.min(Math.max(w*0.95+3, 6), 34);
+    }
+    ws.autoFilter = { from:{row:1,column:1}, to:{row:1,column:ncol} };
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const today = new Date().toISOString().slice(0,10);
+    const el = document.createElement('a');
+    el.href = URL.createObjectURL(blob);
+    el.download = `시모니_${a.name}_${today}.xlsx`;
+    document.body.appendChild(el); el.click();
+    setTimeout(()=>{ URL.revokeObjectURL(el.href); el.remove(); }, 3000);
+    toast(`엑셀 파일을 받았습니다 (${a.rows.length-1}줄)`);
+  }catch(e){
+    toast('엑셀을 만들지 못했습니다: '+(e.message||e), 'bad');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '엑셀로 받기'; }
+  }
 }
 
 /* ── 휴지통 ──
@@ -6558,6 +7148,930 @@ async function printOneRecord(i){
     .eq('form_id', r.form_id).order('sort_order');
   if(error){ toast('항목을 불러오지 못했습니다: '+error.message,'bad'); return; }
   openPrint([r], fields||[], S.forms.find(f=>f.id===r.form_id));
+}
+
+
+/* ═══════════════════════════════════════════════════
+   한글(.hwpx) 보고서 만들기 — 구 시모니 0.5에서 그대로 옮겨 온 부분
+   (ReportExport.html + HwpxTemplate.gs). 표 칸 너비는 실제 양식에서 잰 값이라
+   숫자를 바꾸면 표가 어긋납니다.
+   ═══════════════════════════════════════════════════ */
+/* 한글 빈 문서 뼈대 (0.5의 HwpxTemplate.gs 그대로).
+   ⚠️ 손대지 마세요 — 한글은 칸 서식(borderFill)을 번호가 아니라 '목록 순서'로 찾습니다.
+   여기에 테두리용 13개가 1~13번으로 빈틈없이 들어 있고, 사진 서식은 14번부터 이어 붙습니다. */
+const HWPX_TEMPLATE_B64 =
+  "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";
+
+(function (global) {
+  'use strict';
+
+  // ⚠️ 구글 앱스스크립트의 HTML 템플릿은 '<' + '?' 를 자기 문법(스크립틀릿)으로 읽어버린다.
+  //    XML 선언문을 그대로 적어두면 앱스스크립트가 그걸 코드로 실행하려다
+  //    "SyntaxError: Unexpected identifier 'version'" 을 내며 화면이 아예 안 열린다.
+  //    → 문자를 쪼개어 이어붙여서, 이 파일 안에 여는 꺾쇠+물음표 조합이 남지 않게 한다.
+  //      (이 주석에도 그 두 글자를 나란히 쓰면 안 된다 — 주석도 똑같이 삼켜진다)
+  var XMLDECL = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>';
+
+  var HWPUNIT_MM = 7200 / 25.4;   // 1mm = 283.46 HWPUNIT
+  var PX_MM = 96 / 25.4;          // 1mm = 3.7795 px
+  var PT_MM = 72 / 25.4;          // 1mm = 2.8346 pt
+  var EMU_MM = 36000;
+
+  // 원본 양식(교육 및 간담회 예시.hwpx)에서 실측한 값
+  var LAYOUT = {
+    meeting: {
+      name: '간담회',
+      headers: ['구 분', '일 시', '장소 및 내용', '참석자', '관련 사진'],
+      widths: [4255, 7651, 11623, 9076, 15019],   // 합계 47624 = 168mm
+      hdrBf: [11, 12, 12, 12, 13],                // 뼈대에서 다시 매긴 번호
+      numBf: 6
+    },
+    edu: {
+      name: '교육',
+      headers: ['구 분', '일 시', '참 석 자', '내 용', '관 련 사 진'],
+      widths: [3416, 6907, 10104, 14066, 14265],  // 합계 48758 = 172mm
+      hdrBf: [6, 7, 7, 7, 8],
+      numBf: 9
+    },
+    // 📋 [신설] 회의형 — 수퍼비전·운영점검·자문위원회·역량향상 교육 등 회의록에 맞춘 칸 구성.
+    //    간담회형과 같은 서식 번호를 쓰되, '회의 내용' 칸을 넓게 잡았습니다.
+    confer: {
+      name: '회의',
+      headers: ['구 분', '일 시', '장소 및 참석자', '회 의 내 용', '관련 사진'],
+      widths: [4255, 7651, 10500, 12747, 12471],  // 합계 47624 = 168mm
+      hdrBf: [11, 12, 12, 12, 13],
+      numBf: 6
+    }
+  };
+  var BODY_BF = 5;
+  var HEADER_H = 2232, ROW_H = 11160;
+  var PARA_C = 27, CHAR_BIG = 14, CHAR_SML = 16;
+  var PHOTO_BF_START = 14;        // 뼈대 borderFill이 13개이므로 사진은 14번부터
+
+  function esc(t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* ---------------- 사진: 칸 비율로 가운데 자르기 ---------------- */
+  // 원본 비율이 제각각인 사진을 그대로 넣으면 칸마다 크기가 달라지고 찌그러진다.
+  // 칸 비율(가로/세로)에 맞춰 가운데를 잘라내면 두 문제가 한 번에 해결된다.
+  function cropToCell(img, cellW, cellH, maxPx) {
+    maxPx = maxPx || 900;
+    var target = cellW / cellH;
+    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    var sx = 0, sy = 0, sw = w, sh = h;
+    if (w / h > target) { sw = Math.round(h * target); sx = Math.round((w - sw) / 2); }
+    else { sh = Math.round(w / target); sy = Math.round((h - sh) / 2); }
+
+    var outW = Math.min(sw, maxPx);
+    var outH = Math.round(outW / target);
+    var cv = document.createElement('canvas');
+    cv.width = outW; cv.height = outH;
+    cv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+    var dataUrl = cv.toDataURL('image/jpeg', 0.85);
+    return dataUrl.substring(dataUrl.indexOf(',') + 1);   // base64 부분만
+  }
+
+  function loadImageFromBase64(b64, mime) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      // data: 주소로 넣으면 canvas가 오염되지 않아 잘라내기가 가능하다
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error('사진을 읽지 못했습니다.')); };
+      img.src = 'data:' + (mime || 'image/jpeg') + ';base64,' + b64;
+    });
+  }
+
+  /* ---------------- 한글(.hwpx) ---------------- */
+  function paras(lines, charPr) {
+    if (!lines || !lines.length) lines = [''];
+    return lines.map(function (ln) {
+      return '<hp:p id="2147483648" paraPrIDRef="' + PARA_C + '" styleIDRef="0" pageBreak="0" ' +
+        'columnBreak="0" merged="0"><hp:run charPrIDRef="' + charPr + '">' +
+        (ln === '' ? '' : '<hp:t>' + esc(ln) + '</hp:t>') + '</hp:run></hp:p>';
+    }).join('');
+  }
+
+  function tc(col, row, w, h, lines, charPr, bf) {
+    return '<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" ' +
+      'borderFillIDRef="' + bf + '"><hp:subList id="" textDirection="HORIZONTAL" ' +
+      'lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" ' +
+      'textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">' + paras(lines, charPr) +
+      '</hp:subList><hp:cellAddr colAddr="' + col + '" rowAddr="' + row + '"/>' +
+      '<hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="' + w + '" height="' + h + '"/>' +
+      '<hp:cellMargin left="510" right="510" top="141" bottom="141"/></hp:tc>';
+  }
+
+  function hwpTable(tblId, z, kind, rows, photoBf) {
+    var lay = LAYOUT[kind], W = 0, i;
+    for (i = 0; i < 5; i++) W += lay.widths[i];
+
+    var trs = '<hp:tr>';
+    for (i = 0; i < 5; i++) {
+      trs += tc(i, 0, lay.widths[i], HEADER_H, [lay.headers[i]], CHAR_BIG, lay.hdrBf[i]);
+    }
+    trs += '</hp:tr>';
+
+    for (var r = 0; r < rows.length; r++) {
+      trs += '<hp:tr>';
+      trs += tc(0, r + 1, lay.widths[0], ROW_H, rows[r][0], CHAR_BIG, lay.numBf);
+      for (i = 1; i <= 3; i++) {
+        trs += tc(i, r + 1, lay.widths[i], ROW_H, rows[r][i], CHAR_SML, BODY_BF);
+      }
+      trs += tc(4, r + 1, lay.widths[4], ROW_H, [], CHAR_SML, photoBf[r] || BODY_BF);
+      trs += '</hp:tr>';
+    }
+
+    return '<hp:tbl id="' + tblId + '" zOrder="' + z + '" numberingType="TABLE" ' +
+      'textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" ' +
+      'pageBreak="CELL" repeatHeader="1" rowCnt="' + (rows.length + 1) + '" colCnt="5" ' +
+      'cellSpacing="0" borderFillIDRef="' + BODY_BF + '" noAdjust="0">' +
+      '<hp:sz width="' + W + '" widthRelTo="ABSOLUTE" height="' + (HEADER_H + ROW_H * rows.length) +
+      '" heightRelTo="ABSOLUTE" protect="0"/>' +
+      '<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" ' +
+      'holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" ' +
+      'vertOffset="653" horzOffset="0"/>' +
+      '<hp:outMargin left="283" right="283" top="283" bottom="283"/>' +
+      '<hp:inMargin left="510" right="510" top="141" bottom="141"/>' + trs + '</hp:tbl>';
+  }
+
+  var PHOTO_BF_XML =
+    '<hh:borderFill id="{ID}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0">' +
+    '<hh:slash type="NONE" Crooked="0" isCounter="0"/>' +
+    '<hh:backSlash type="NONE" Crooked="0" isCounter="0"/>' +
+    '<hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>' +
+    '<hc:fillBrush><hc:imgBrush mode="TOTAL">' +
+    '<hc:img binaryItemIDRef="{IMG}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/>' +
+    '</hc:imgBrush></hc:fillBrush></hh:borderFill>';
+
+  // sections: [{title, kind, rows:[[c0줄들,c1줄들,c2줄들,c3줄들],...], photos:[b64|null,...]}]
+  function buildHwpx(templateB64, sections) {
+    var JSZipRef = global.JSZip;
+    return JSZipRef.loadAsync(templateB64, { base64: true }).then(function (zip) {
+      return Promise.all([
+        zip.file('Contents/header.xml').async('string'),
+        zip.file('Contents/content.hpf').async('string')
+      ]).then(function (parts) {
+        var header = parts[0], hpf = parts[1];
+        var bfXml = '', itemXml = '', bfId = PHOTO_BF_START, imgNo = 1;
+        var photoBfBySection = [];
+
+        sections.forEach(function (sec) {
+          var map = [];
+          (sec.photos || []).forEach(function (b64, ri) {
+            if (!b64) { map[ri] = null; return; }
+            var name = 'image' + imgNo;
+            zip.file('BinData/' + name + '.jpg', b64, { base64: true, createFolders: false });
+            itemXml += '<opf:item id="' + name + '" href="BinData/' + name + '.jpg" ' +
+              'media-type="image/jpg" isEmbeded="1"/>';
+            bfXml += PHOTO_BF_XML.replace('{ID}', bfId).replace('{IMG}', name);
+            map[ri] = bfId;
+            bfId++; imgNo++;
+          });
+          photoBfBySection.push(map);
+        });
+
+        header = header.replace('</hh:borderFills>', bfXml + '</hh:borderFills>');
+        var count = (header.match(/<hh:borderFill id=/g) || []).length;
+        header = header.replace(/(<hh:borderFills itemCnt=")\d+(")/, '$1' + count + '$2');
+        zip.file('Contents/header.xml', header);
+
+        hpf = hpf.replace('</opf:manifest>', itemXml + '</opf:manifest>');
+        zip.file('Contents/content.hpf', hpf);
+
+        // 본문
+        var secPrMatch = header;  // secPr는 뼈대의 section 원본에 없으므로 아래 상수 사용
+        var body = '', tblId = 2000000, z = 0;
+        sections.forEach(function (sec, si) {
+          var pbf = photoBfBySection[si] || [];
+          body += '<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" ' +
+            'columnBreak="0" merged="0"><hp:run charPrIDRef="' + CHAR_BIG + '">' +
+            (si === 0 ? SEC_PR : '') + '<hp:t>' + esc(sec.title) + '</hp:t></hp:run></hp:p>';
+          body += '<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" ' +
+            'columnBreak="0" merged="0"><hp:run charPrIDRef="' + CHAR_BIG + '">' +
+            hwpTable(tblId++, z++, sec.kind, sec.rows, pbf) + '</hp:run></hp:p>';
+          body += '<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" ' +
+            'columnBreak="0" merged="0"><hp:run charPrIDRef="' + CHAR_BIG + '"/></hp:p>';
+        });
+        zip.file('Contents/section0.xml', SEC_HEAD + body + '</hs:sec>');
+
+        // 미리보기에는 이번에 만든 내용만 남긴다 (원본 문서 내용이 딸려가지 않도록)
+        var prv = [];
+        sections.forEach(function (sec) {
+          prv.push(sec.title);
+          prv.push('<' + LAYOUT[sec.kind].headers.join('><') + '>');
+          sec.rows.forEach(function (row) {
+            prv.push('<' + row.map(function (x) { return x.join(' '); }).join('><') + '><>');
+          });
+          prv.push('');
+        });
+        zip.file('Preview/PrvText.txt', prv.join('\n'));
+
+        // ⚠️ mimetype은 zip의 첫 항목이면서 '무압축'이어야 한다 (HWPX 패키지 규격).
+        //    JSZip은 기본으로 전부 압축하므로 이 한 개만 따로 되돌려 놓는다.
+        zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE' });
+
+        return zip.generateAsync({
+          type: 'blob',
+          mimeType: 'application/hwp+zip',
+          compression: 'DEFLATE'
+        });
+      });
+    });
+  }
+
+  var SEC_HEAD = XMLDECL +
+    '<hs:sec xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app" ' +
+    'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" ' +
+    'xmlns:hp10="http://www.hancom.co.kr/hwpml/2016/paragraph" ' +
+    'xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" ' +
+    'xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core" ' +
+    'xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" ' +
+    'xmlns:hhs="http://www.hancom.co.kr/hwpml/2011/history" ' +
+    'xmlns:hm="http://www.hancom.co.kr/hwpml/2011/master-page" ' +
+    'xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf" ' +
+    'xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+    'xmlns:opf="http://www.idpf.org/2007/opf/" ' +
+    'xmlns:ooxmlchart="http://www.hancom.co.kr/hwpml/2016/ooxmlchart" ' +
+    'xmlns:hwpunitchar="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar" ' +
+    'xmlns:epub="http://www.idpf.org/2007/ops" ' +
+    'xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0">';
+
+  // 용지 설정: A4 세로, 좌우 여백 20mm (원본 보고서와 동일)
+  var SEC_PR = '<hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134" ' +
+    'tabStop="8000" tabStopVal="4000" tabStopUnit="HWPUNIT" outlineShapeIDRef="1" ' +
+    'memoShapeIDRef="0" textVerticalWidthHead="0" masterPageCnt="0">' +
+    '<hp:grid lineGrid="0" charGrid="0" wonggojiFormat="0" strtnum="0"/>' +
+    '<hp:startNum pageStartsOn="BOTH" page="0" pic="0" tbl="0" equation="0"/>' +
+    '<hp:visibility hideFirstHeader="0" hideFirstFooter="0" hideFirstMasterPage="0" ' +
+    'border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" ' +
+    'showLineNumber="0"/>' +
+    '<hp:lineNumberShape restartType="0" countBy="0" distance="0" startNumber="0"/>' +
+    '<hp:pagePr landscape="WIDELY" width="59528" height="84186" gutterType="LEFT_ONLY">' +
+    '<hp:margin header="4252" footer="4252" gutter="0" left="5669" right="5669" ' +
+    'top="5669" bottom="4252"/></hp:pagePr>' +
+    '<hp:footNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" ' +
+    'supscript="0"/><hp:noteLine length="-1" type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hp:noteSpacing betweenNotes="850" belowLine="567" aboveLine="850"/>' +
+    '<hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="EACH_COLUMN" ' +
+    'beneathText="0"/></hp:footNotePr>' +
+    '<hp:endNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" ' +
+    'supscript="0"/><hp:noteLine length="14692344" type="SOLID" width="0.12 mm" color="#000000"/>' +
+    '<hp:noteSpacing betweenNotes="0" belowLine="567" aboveLine="850"/>' +
+    '<hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="END_OF_DOCUMENT" ' +
+    'beneathText="0"/></hp:endNotePr>' +
+    '<hp:pageBorderFill type="BOTH" borderFillIDRef="1" textBorder="PAPER" ' +
+    'headerInside="0" footerInside="0" fillArea="PAPER">' +
+    '<hp:offset left="1417" right="1417" top="1417" bottom="1417"/></hp:pageBorderFill>' +
+    '<hp:pageBorderFill type="EVEN" borderFillIDRef="1" textBorder="PAPER" ' +
+    'headerInside="0" footerInside="0" fillArea="PAPER">' +
+    '<hp:offset left="1417" right="1417" top="1417" bottom="1417"/></hp:pageBorderFill>' +
+    '<hp:pageBorderFill type="ODD" borderFillIDRef="1" textBorder="PAPER" ' +
+    'headerInside="0" footerInside="0" fillArea="PAPER">' +
+    '<hp:offset left="1417" right="1417" top="1417" bottom="1417"/></hp:pageBorderFill>' +
+    '</hp:secPr>';
+
+  global.SimonyReport = {
+    LAYOUT: LAYOUT,
+    ROW_H: ROW_H,
+    cropToCell: cropToCell,
+    loadImageFromBase64: loadImageFromBase64,
+    buildHwpx: buildHwpx
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+(function (global) {
+  'use strict';
+  var HWPX_REGION = '';
+  function setHwpxRegion(n){ HWPX_REGION = n || ''; }
+  function lines(t){ return String(t == null ? '' : t).split(/\r?\n/)
+      .map(function(x){ return x.trim(); }).filter(function(x){ return x !== ''; }); }
+
+  // ===================================================================
+  // 업무보고 값 → 양식 표의 각 칸 (한 칸 = 여러 줄)
+  // -------------------------------------------------------------------
+  // 실제 보고서(창원 2분기)를 그대로 대조해서 맞춘 규칙입니다.
+  //   · 모든 칸이 4~6줄로 짧게 고정되어 있어 행 높이와 사진 크기가 일정하다.
+  //     내용을 통째로 넣으면 칸이 늘어나고 사진까지 같이 길어지므로 반드시 줄 수를 막는다.
+  //   · 장소 및 내용 = 관서 → 센터·팀 → 내용  (관서가 맨 앞)
+  //   · 참석자      = 상담사 → 관서 → 센터·팀 → 소방공무원 N명
+  // ===================================================================
+
+  // 칸 폭을 '한글 글자 몇 개분'으로 환산한 값 (9pt 기준, 칸 여백 제외)
+  // 숫자·영문은 한글의 절반 폭이므로 글자 수가 아니라 아래 visualLen으로 재야 한다.
+  // (그냥 글자 수로 세면 "대산119안전센터 1팀" 같은 줄에서 '1팀'이 잘려나간다)
+  var COL_CHARS = {
+    meeting: [4, 8, 11, 8, 0],   // 구분 / 일시 / 장소 및 내용 / 참석자 / 사진
+    edu: [4, 7, 10, 14, 0],      // 구분 / 일시 / 참석자 / 내용 / 사진
+    confer: [4, 8, 10, 12, 0]    // 구분 / 일시 / 장소 및 참석자 / 회의 내용 / 사진
+  };
+
+  // 한글 1.0 / 숫자·영문·기호 0.5 로 친 실제 차지 폭
+  function visualLen(t) {
+    var n = 0;
+    for (var i = 0; i < t.length; i++) n += (t.charCodeAt(i) > 0x2000 ? 1 : 0.5);
+    return n;
+  }
+  var MAX_LINES = 6;               // 39.4mm 행에 9pt로 안전하게 들어가는 줄 수
+
+  // 긴 줄을 칸 폭에 맞춰 접는다 (단어 중간을 되도록 끊지 않음)
+  function wrapLine(text, maxChars) {
+    var t = String(text == null ? '' : text).trim();
+    if (!t) return [];
+    if (visualLen(t) <= maxChars) return [t];
+    var out = [], cur = '';
+    t.split(/\s+/).forEach(function (w) {
+      while (visualLen(w) > maxChars) {              // 한 단어가 칸보다 길면 잘라 넣는다
+        if (cur) { out.push(cur); cur = ''; }
+        var cut = 0, acc = 0;
+        while (cut < w.length && acc + (w.charCodeAt(cut) > 0x2000 ? 1 : 0.5) <= maxChars) {
+          acc += (w.charCodeAt(cut) > 0x2000 ? 1 : 0.5); cut++;
+        }
+        out.push(w.slice(0, cut));
+        w = w.slice(cut);
+      }
+      if (!cur) cur = w;
+      else if (visualLen(cur + ' ' + w) <= maxChars) cur += ' ' + w;
+      else { out.push(cur); cur = w; }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  // 여러 줄을 칸 폭에 맞춰 접고 최대 줄 수까지만 남긴다
+  function fitLines(srcLines, maxChars, maxLines) {
+    var out = [];
+    for (var i = 0; i < srcLines.length && out.length < maxLines; i++) {
+      var w = wrapLine(srcLines[i], maxChars);
+      for (var k = 0; k < w.length && out.length < maxLines; k++) out.push(w[k]);
+    }
+    return out;
+  }
+
+  // 📋 참석 체크(sil/bu/hq)를 보고서에 적을 말로 바꾼다
+  var ATTEND_TEXT = { sil: '상담실장 참석', bu: '부실장 참석', hq: '본부 보건팀장(계장) 참석' };
+  function attendLines(r) {
+    var f = String(r.attendFlags || '').trim();
+    if (!f) return [];
+    return f.split(',').map(function (x) { return ATTEND_TEXT[x.trim()]; }).filter(Boolean);
+  }
+
+  // 저장된 관서값. 예전 기록은 관서 대신 권역명("경남소방")이 들어가 있는데,
+  // 그건 장소 정보가 아니므로 표에 넣지 않는다.
+  function stationOf(r) {
+    var st = String(r.station || '').trim();
+    if (!st) return '';
+    var reg = String(HWPX_REGION || '').trim();
+    if (st === reg || st === reg.replace('소방', '') ||
+        st === reg + '소방' || /^(경남|창원|중구본)소방$/.test(st)) return '';
+    return st;
+  }
+
+  // 일시: 참고 보고서처럼 날짜 / 시작 / ~ / 종료 네 줄로 나눈다
+  function whenLines(r) {
+    var out = r.dateText ? [r.dateText] : [];
+    var t = String(r.time || '').trim();
+    if (!t) return out;
+    var m = t.replace(/\s/g, '').match(/^(\d{1,2}:?\d{2})[~\-–](\d{1,2}:?\d{2})$/);
+    if (m) {
+      var fix = function (x) {
+        x = x.replace(':', '');
+        return x.length >= 3 ? (('0000' + x).slice(-4).replace(/^(\d\d)(\d\d)$/, '$1:$2')) : x;
+      };
+      out.push(fix(m[1]), '~', fix(m[2]));
+    } else {
+      out.push(t);
+    }
+    return out;
+  }
+
+  // 참석자: 상담사 → 관서 → 센터·팀 → 인원
+  // 인원 줄은 줄 수 제한에 밀려 사라지면 안 되므로 마지막에 따로 붙인다.
+  function whoLines(r, kind, maxChars) {
+    var out = [];
+    var who = String(r.counselor || '').trim();
+    if (who) out.push(kind === 'edu' ? ('전문상담사 – ' + who) : (who + ' 상담사'));
+    if (kind === 'edu') {
+      var st = stationOf(r); if (st) out.push(st);
+      if (r.place) out.push(r.place);
+    } else {
+      // 간담회·순회교육은 센터장 등 실제 참석자 이름이 중요하므로 저장된 명단을 먼저 쓴다.
+      // 단, 작성 상담사와 같은 사람이 명단에도 적혀 있으면 두 번 나오므로 걸러낸다.
+      lines(r.attendees).forEach(function (x) {
+        if (who && x.replace(/\s/g, '').indexOf(who.replace(/\s/g, '')) !== -1) return;
+        out.push(x);
+      });
+    }
+    var n = String(r.attendeeCount || '').replace(/[^0-9]/g, '');
+    var body = fitLines(out, maxChars, n ? 3 : 4);
+    if (n) body.push('소방공무원 ' + n + '명');
+    return body;
+  }
+
+  // 장소 및 내용(간담회형) / 내용(교육형)
+  function whatLines(r, kind, maxChars) {
+    var out = [];
+    if (kind === 'edu') {
+      var st = stationOf(r) || String(r.place || '').trim();
+      out.push((st ? st + ' ' : '') + '정신건강 교육');
+    } else {
+      var st2 = stationOf(r); if (st2) out.push(st2);
+      if (r.place) out.push(r.place);
+    }
+    // 제목·내용에서 앞 3줄만 (길면 잘라 쓰고, 나머지는 한글에서 직접 붙이시면 됩니다)
+    var body = [];
+    // 제목이 "창녕119안전센터 간담회 회의록"처럼 바로 위 줄(센터명)로 시작하면
+    // 같은 말이 두 번 나오므로 겹치는 앞부분을 떼어낸다
+    var t = String(r.title || '').trim();
+    var pl = String(r.place || '').trim();
+    if (t && pl && t.indexOf(pl) === 0) t = t.slice(pl.length).trim();
+    if (t) body.push(t);
+    lines(r.content).forEach(function (x) { body.push(x); });
+    var head = fitLines(out, maxChars, 2);
+    var tail = fitLines(body, maxChars, Math.max(0, MAX_LINES - head.length));
+    return head.concat(tail).slice(0, MAX_LINES);
+  }
+
+  // 회의형 — 장소 및 참석자 : 장소 → 참석자 명단 → 참석 체크 → N명
+  function conferWhoLines(r, maxChars) {
+    var out = [];
+    var st = stationOf(r);
+    if (st) out.push(st);
+    if (r.place) out.push(r.place);
+    lines(r.attendees).forEach(function (x) { out.push(x); });
+    attendLines(r).forEach(function (x) { out.push(x); });
+    var n = String(r.attendeeCount || '').replace(/[^0-9]/g, '');
+    var body = fitLines(out, maxChars, n ? MAX_LINES - 1 : MAX_LINES);
+    if (n) body.push('참석 ' + n + '명');
+    return body;
+  }
+
+  // 회의형 — 회의 내용 : 제목 → 본문 (외부교육은 이수시간, 홍보물은 하위구분을 앞에 붙인다)
+  function conferWhatLines(r, maxChars) {
+    var body = [];
+    var t = String(r.title || '').trim();
+    if (t) body.push(t);
+    if (r.sub) body.push('구분 : ' + r.sub);
+    if (r.hours) body.push('교육시간 : ' + r.hours + '시간');
+    lines(r.content).forEach(function (x) { body.push(x); });
+    return fitLines(body, maxChars, MAX_LINES);
+  }
+
+  function cellsFor(kind, r, i) {
+    var cc = COL_CHARS[kind];
+    var when = whenLines(r);   // 일시는 접지 않는다 — 접으면 종료시각이 밀려 사라진다
+    if (kind === 'confer') {
+      return [[String(i + 1)], when, conferWhoLines(r, cc[2]), conferWhatLines(r, cc[3])];
+    }
+    if (kind === 'meeting') {
+      return [[String(i + 1)], when, whatLines(r, kind, cc[2]), whoLines(r, kind, cc[3])];
+    }
+    // 교육형은 참석자·내용 순서가 반대
+    return [[String(i + 1)], when, whoLines(r, kind, cc[2]), whatLines(r, kind, cc[3])];
+  }
+  global.SimonyCells = { cellsFor: cellsFor, setRegion: setHwpxRegion, COL_CHARS: COL_CHARS };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ═══════════════════════════════════════════════════
+   보고서 양식 내보내기 — 한글(.hwpx)
+
+   구 시모니 0.5의 ReportExport를 옮겨 온 것입니다. 표를 만드는 부분(SimonyReport,
+   SimonyCells)은 0.5 코드 그대로이고, 여기서는 «1.0의 기록을 그 코드가 아는
+   모양으로 바꿔 주는 일»만 합니다.
+
+   0.5는 항목 이름이 코드에 박혀 있었지만(date·place·attendees…), 1.0은 항목을
+   관리자가 직접 만듭니다. 그래서 «어느 항목이 양식의 어느 칸인가»를 이어 줘야
+   합니다. 항목 이름을 보고 먼저 짐작해 두고, 틀리면 화면에서 고칠 수 있게 했습니다.
+   고친 짝은 forms.report_map에 적어 두므로 다음부터는 그대로 씁니다(patch26).
+   ═══════════════════════════════════════════════════ */
+
+// 한글 파일을 만드는 도구(JSZip)는 무거우므로, 내보낼 때 딱 한 번만 받아 옵니다.
+// 첫 번째 주소는 이 화면이 이미 쓰고 있는 곳(jsDelivr)입니다 — 시모니가 열렸다면
+// 거기는 이미 뚫려 있다는 뜻이므로 가장 안전합니다. 혹시 막히면 두 번째로 받습니다.
+const JSZIP_URLS = [
+  'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+];
+function ensureJSZip(i){
+  if(window.JSZip) return Promise.resolve();
+  i = i || 0;
+  if(i >= JSZIP_URLS.length){
+    return Promise.reject(new Error('한글 파일을 만드는 도구를 받지 못했습니다. 인터넷 연결을 확인해 주세요.'));
+  }
+  return new Promise((ok, bad)=>{
+    const s = document.createElement('script');
+    s.src = JSZIP_URLS[i];
+    s.onload = ()=>ok();
+    s.onerror = ()=>bad(new Error('next'));
+    document.head.appendChild(s);
+  }).catch(()=>ensureJSZip(i+1));
+}
+
+/* 양식의 칸 ↔ 폼 항목 이어 주기 */
+const REPORT_SLOTS = [
+  ['dateText',      '일시 — 날짜',   ['date','text']],
+  ['time',          '일시 — 시간',   ['timerange','time','text']],
+  ['station',       '관서',         ['text','select']],
+  ['place',         '장소 · 센터',   ['text','select']],
+  ['title',         '제목 · 주제',   ['text']],
+  ['attendees',     '참석자 명단',   ['textarea','text']],
+  ['attendeeCount', '참석 인원',    ['number','text']],
+  ['content',       '내용',         ['textarea']],
+  ['photo',         '사진',         ['file']],
+];
+// 항목 이름에 이런 말이 들어 있으면 그 칸으로 짐작합니다
+const REPORT_GUESS = {
+  dateText:      [/실시일|일자|날짜|일시/],
+  time:          [/시간|시각/],
+  station:       [/관서|소방서/],
+  place:         [/장소|센터|위치|기관/],
+  title:         [/제목|주제|과정|과목/],
+  attendees:     [/참석자|참여자|명단|대상자/],
+  attendeeCount: [/인원|명수|참석수/],
+  content:       [/내용|회의|진행|경과/],
+  photo:         [/사진|현장/],
+};
+function guessReportMap(fields){
+  const map = {};
+  const used = new Set();
+  for(const [slot, , types] of REPORT_SLOTS){
+    const pats = REPORT_GUESS[slot] || [];
+    const hit = (fields||[]).find(f=>{
+      if(used.has(f.field_key)) return false;
+      if(f.is_active === false) return false;
+      if(!types.includes(f.field_type)) return false;
+      if(slot==='photo' && /서명/.test(f.label||'')) return false;   // 서명부는 사진이 아닙니다
+      return pats.some(p=>p.test(String(f.label||'')));
+    });
+    if(hit){ map[slot] = hit.field_key; used.add(hit.field_key); }
+  }
+  // 이름으로 못 찾았지만 종류가 하나뿐이면 그것으로 채웁니다
+  const onlyOne = (type, slot)=>{
+    if(map[slot]) return;
+    const cand = (fields||[]).filter(f=>f.field_type===type && !used.has(f.field_key)
+      && !(slot==='photo' && /서명/.test(f.label||'')));
+    if(cand.length===1){ map[slot]=cand[0].field_key; used.add(cand[0].field_key); }
+  };
+  onlyOne('date','dateText'); onlyOne('timerange','time');
+  onlyOne('textarea','content'); onlyOne('file','photo');
+  return map;
+}
+
+/* 기록 한 건 → 0.5의 표 만들기 코드가 아는 모양 */
+function reportRecordOf(rec, map){
+  const g = slot => { const k = map[slot]; return k ? rec.data?.[k] : null; };
+  const txt = v => Array.isArray(v) ? v.join(', ')
+                 : (v===null||v===undefined) ? '' : String(v);
+  const files = (()=>{ const v = g('photo'); return Array.isArray(v) ? v : []; })();
+  return {
+    dateText: txt(g('dateText')).slice(0,10),
+    time: txt(g('time')),
+    station: txt(g('station')),
+    place: txt(g('place')),
+    title: txt(g('title')),
+    attendees: txt(g('attendees')),
+    attendeeCount: txt(g('attendeeCount')),
+    content: txt(g('content')),
+    counselor: rec.author_name || '',
+    photoFile: files[0] || null,
+    _rec: rec,
+  };
+}
+
+/* 구분 값 → 한글 표 양식 */
+function guessKind(label){
+  const s = String(label||'');
+  if(/간담회/.test(s)) return 'meeting';
+  if(/회의|수퍼비전|자문|점검|협의/.test(s)) return 'confer';
+  return 'edu';
+}
+
+/* 내보내기 화면 열기 */
+async function openHwpxExport(){
+  const idx = [...document.querySelectorAll('input[name="recpick"]:checked')].map(cb=>+cb.value);
+  if(!idx.length){ toast('내보낼 기록을 골라 주세요 (왼쪽 네모칸)','bad'); return; }
+  const recs = idx.map(i=>S._recs[i]).filter(Boolean);
+
+  // 저장해 둔 짝이 있으면 그것을, 없으면 항목 이름으로 짐작합니다
+  const saved = S.form?.report_map && typeof S.form.report_map === 'object'
+    ? S.form.report_map : null;
+  const map = Object.assign(guessReportMap(S.fields), saved || {});
+
+  // 구분 항목 값으로 묶습니다 (간담회 따로, 팀별 교육 따로 — 원본 보고서가 그렇습니다)
+  const kf = listKindField();
+  const byKind = new Map();
+  recs.forEach(r=>{
+    const k = kf ? String(r.data?.[kf.field_key] || '기타') : (S.form.title || '보고');
+    if(!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k).push(r);
+  });
+
+  S._exp = {
+    map, guessed: !saved,
+    groups: [...byKind.entries()].map(([label, rs])=>{
+      rs = rs.slice().sort((a,b)=>{
+        const da = reportRecordOf(a, map).dateText, db = reportRecordOf(b, map).dateText;
+        return String(da).localeCompare(String(db));
+      });
+      return { label, kind: guessKind(label), recs: rs, title: autoTitle(label, rs, map) };
+    }),
+  };
+  renderHwpxExport();
+}
+// 표 제목 자동 만들기 — '찾아가는 상담실 팀별 교육(3월 ~ 5월 총 7회 84명)'
+function autoTitle(label, recs, map){
+  const rr = recs.map(r=>reportRecordOf(r, map));
+  const months = rr.map(r=>r.dateText.slice(5,7)).filter(m=>/^\d{2}$/.test(m)).sort();
+  const total = rr.reduce((a,r)=>{
+    const n = parseInt(String(r.attendeeCount).replace(/[^0-9]/g,''), 10);
+    return a + (isNaN(n) ? 0 : n);
+  }, 0);
+  const span = months.length
+    ? (months[0]===months[months.length-1]
+        ? `${parseInt(months[0],10)}월`
+        : `${parseInt(months[0],10)}월 ~ ${parseInt(months[months.length-1],10)}월`)
+    : '';
+  return `찾아가는 상담실 ${label}(${span?span+' ':''}총 ${recs.length}회${total?` ${total}명`:''})`;
+}
+
+function renderHwpxExport(){
+  const E = S._exp;
+  const opt = (sel, list) => list.map(([v,l])=>
+    `<option value="${esc(v)}" ${v===sel?'selected':''}>${esc(l)}</option>`).join('');
+  const fieldOpts = types => [['','— 없음 —']].concat(
+    (S.fields||[]).filter(f=>types.includes(f.field_type))
+      .map(f=>[f.field_key, `${f.label} (${typeLabel(f.field_type)})`]));
+
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `<div class="modal" style="max-width:1000px">
+    <h3>한글(.hwpx) 보고서 양식으로 내보내기</h3>
+    ${E.guessed ? `<div class="msg info">항목 이름을 보고 칸을 짐작해 두었습니다.
+      아래에서 확인하시고 틀린 곳만 고쳐 주세요.
+      «이 짝 기억해 두기»를 누르면 다음부터는 묻지 않습니다.</div>` : ''}
+
+    <details ${E.guessed?'open':''}>
+      <summary class="section-title" style="cursor:pointer;list-style:revert">
+        양식의 칸에 어느 항목을 넣을까요${E.guessed?'':' (저장해 둔 짝을 씁니다 — 눌러서 확인)'}</summary>
+      <div class="grid">
+        ${REPORT_SLOTS.map(([slot,label,types])=>`
+          <div class="field"><label>${esc(label)}</label>
+            <select onchange="S._exp.map['${slot}']=this.value;renderHwpxExportPreview()">
+              ${opt(E.map[slot]||'', fieldOpts(types))}</select></div>`).join('')}
+      </div>
+      <div class="actions" style="border-top:0;padding-top:6px">
+        <button class="btn ghost" onclick="saveReportMap()">이 짝 기억해 두기</button>
+        <span class="hint">폼에 저장되므로 다른 상담사도 같은 짝을 씁니다.</span>
+      </div>
+    </details>
+
+    <div class="section-title">표 ${E.groups.length}개가 만들어집니다</div>
+    <div id="expPreview"></div>
+
+    <div class="actions">
+      <button class="btn" id="expGo" onclick="makeHwpx()">한글 파일 만들기</button>
+      <button class="btn ghost" onclick="this.closest('.overlay').remove()">취소</button>
+      <span class="hint" id="expStatus"></span>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  renderHwpxExportPreview();
+}
+
+function renderHwpxExportPreview(){
+  const box = $('expPreview'); if(!box) return;
+  const E = S._exp;
+  box.innerHTML = E.groups.map((g,gi)=>{
+    const L = window.SimonyReport.LAYOUT[g.kind];
+    const rows = g.recs.map((r,i)=>{
+      const rr = reportRecordOf(r, E.map);
+      window.SimonyCells.setRegion(regionNameOf(r.region_id));
+      const c = window.SimonyCells.cellsFor(g.kind, rr, i);
+      return { c, photo: !!rr.photoFile };
+    });
+    return `<div style="margin-bottom:22px">
+      <div class="filter-bar">
+        <select onchange="S._exp.groups[${gi}].kind=this.value;renderHwpxExportPreview()">
+          <option value="meeting" ${g.kind==='meeting'?'selected':''}>간담회형 (구분/일시/장소 및 내용/참석자/사진)</option>
+          <option value="edu" ${g.kind==='edu'?'selected':''}>교육형 (구분/일시/참석자/내용/사진)</option>
+          <option value="confer" ${g.kind==='confer'?'selected':''}>회의형 (구분/일시/장소 및 참석자/회의 내용/사진)</option>
+        </select>
+        <span class="tag">${g.recs.length}건</span>
+      </div>
+      <div class="field"><label>표 제목</label>
+        <input type="text" value="${esc(g.title)}"
+          oninput="S._exp.groups[${gi}].title=this.value"></div>
+      <div class="scroll-x"><table class="list-table" style="margin-top:8px"><thead><tr>
+        <th style="width:52px">${esc(L.headers[0])}</th>
+        <th style="width:120px">${esc(L.headers[1])}</th>
+        <th>${esc(L.headers[2])}</th><th>${esc(L.headers[3])}</th>
+        <th style="width:70px">${esc(L.headers[4])}</th>
+      </tr></thead><tbody>${rows.map(({c,photo},i)=>`<tr>
+        <td class="num">${i+1}</td>
+        <td class="nowrap">${esc(c[1].join(' '))}</td>
+        <td>${esc(c[2].join(' / '))||'<span style="color:var(--warn)">비어 있음</span>'}</td>
+        <td>${esc(c[3].join(' / '))||'<span style="color:var(--warn)">비어 있음</span>'}</td>
+        <td class="num">${photo?'<span class="tag">있음</span>':'<span style="color:var(--sub)">없음</span>'}</td>
+      </tr>`).join('')}</tbody></table></div>
+    </div>`;
+  }).join('');
+}
+function regionNameOf(id){
+  return ((S.allRegions||S.regions||[]).find(r=>r.id===id)||{}).name || '';
+}
+
+/* 고친 짝을 폼에 적어 둡니다 (관리자만 — 상담사는 이번 한 번만 쓰고 저장은 안 됩니다) */
+async function saveReportMap(){
+  if(!canManage()){
+    toast('짝을 저장하는 것은 관리자만 할 수 있습니다. 이번 내보내기에는 그대로 적용됩니다.','bad');
+    return;
+  }
+  const { error } = await sb.from('forms').update({ report_map: S._exp.map }).eq('id', S.form.id);
+  if(error){ toast('저장하지 못했습니다: '+error.message,'bad'); return; }
+  const f = S.forms.find(x=>x.id===S.form.id); if(f) f.report_map = S._exp.map;
+  S.form.report_map = S._exp.map;
+  S._exp.guessed = false;
+  toast('이 폼의 칸 짝을 저장했습니다');
+}
+
+/* 사진 한 장을 base64로. 임시 주소를 받아 와 받아옵니다. */
+async function photoBase64(file){
+  if(!file || !file.path) return null;
+  try{
+    const signed = await signFiles([file]);
+    const url = signed[0]?.url;
+    if(!url) return null;
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    const blob = await res.blob();
+    const b64 = await new Promise(ok=>{
+      const fr = new FileReader();
+      fr.onload = ()=>ok(String(fr.result).split(',')[1] || '');
+      fr.onerror = ()=>ok('');
+      fr.readAsDataURL(blob);
+    });
+    return b64 ? { base64:b64, mime: blob.type || 'image/jpeg' } : null;
+  }catch(e){ return null; }
+}
+
+async function makeHwpx(){
+  const btn = $('expGo'), st = $('expStatus');
+  const say = (t, bad)=>{ if(st){ st.textContent = t; st.style.color = bad ? 'var(--warn)' : ''; } };
+  btn.disabled = true;
+  try{
+    say('한글 파일 도구를 준비하는 중…');
+    await ensureJSZip();
+    const R = window.SimonyReport, C = window.SimonyCells;
+    const E = S._exp;
+
+    let want = 0, got = 0;
+    E.groups.forEach(g=>g.recs.forEach(r=>{ if(reportRecordOf(r,E.map).photoFile) want++; }));
+
+    const sections = [];
+    for(const g of E.groups){
+      const rows = [], photos = [];
+      for(let i=0;i<g.recs.length;i++){
+        const rec = g.recs[i];
+        const rr = reportRecordOf(rec, E.map);
+        C.setRegion(regionNameOf(rec.region_id));
+        rows.push(C.cellsFor(g.kind, rr, i));
+
+        let b64 = null;
+        if(rr.photoFile){
+          say(`사진을 가져오는 중… (${got+1}/${want})`);
+          const p = await photoBase64(rr.photoFile);
+          if(p){
+            try{
+              const img = await R.loadImageFromBase64(p.base64, p.mime);
+              // 칸 비율대로 가운데를 잘라 넣어야 사진마다 크기가 같고 찌그러지지 않습니다
+              b64 = R.cropToCell(img, R.LAYOUT[g.kind].widths[4], R.ROW_H);
+              got++;
+            }catch(e){ b64 = null; }
+          }
+        }
+        photos.push(b64);
+      }
+      sections.push({ title: g.title, kind: g.kind, rows, photos });
+    }
+
+    say('한글 파일을 만드는 중…');
+    const blob = await R.buildHwpx(HWPX_TEMPLATE_B64, sections);
+    const d = new Date();
+    const name = `보고서양식_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.hwpx`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 3000);
+
+    say(want && got < want
+      ? `만들었습니다. 사진은 ${got}/${want}장만 들어갔습니다 (못 가져온 것은 빈 칸으로 두었습니다)`
+      : `만들었습니다.${want?` 사진 ${got}장 포함.`:''} 내려받은 파일을 한글에서 열어 보세요.`,
+      want && got < want);
+  }catch(e){
+    say('만들지 못했습니다: '+e.message, true);
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 function openDetail(i){
