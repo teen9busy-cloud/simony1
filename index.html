@@ -671,7 +671,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-03 운영기록';
+const APP_VERSION = '2026-09-03 운영기록2';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -8245,9 +8245,21 @@ function openDetail(i){
   if(S.form.links_client){
     rows += `<dt>내담자</dt><dd>${esc(r.client_name||'')} · ${esc(r.birth_date||'')} · ${esc(r.gender||'')} · ID ${esc(r.client_internal_id||'')}</dd>`;
   }
+  // 사진·파일 항목은 이름만 적어서는 [object Object]가 됩니다.
+  // 주소를 받아 온 뒤 작은 그림으로 채워 넣습니다 (관리 → 전체 기록과 같은 방식).
+  const photoSlots = [];
   for(const f of S.fields){
     const v = r.data?.[f.field_key];
     if(v===null||v===undefined||v==='') continue;
+    if(f.field_type==='file'){
+      const list = Array.isArray(v) ? v : (typeof v==='string' && v.trim() ? [{ path:null, name:v, url:v }] : []);
+      if(!list.length) continue;
+      const slot = 'ph_'+Math.random().toString(36).slice(2,9);
+      photoSlots.push({ slot, list });
+      rows += `<dt>${esc(f.label)}</dt>
+        <dd><div class="thumbs" id="${slot}"><span class="hint">${list.length}장 불러오는 중…</span></div></dd>`;
+      continue;
+    }
     rows += `<dt>${esc(f.label)}</dt><dd>${esc(Array.isArray(v)?v.join(', '):typeof v==='boolean'?(v?'예':'아니오'):v)}</dd>`;
   }
   const ov=document.createElement('div');
@@ -8265,6 +8277,18 @@ function openDetail(i){
     </div>
   </div>`;
   document.body.appendChild(ov);
+  // 사진은 볼 때마다 잠깐 쓸 주소를 새로 받아 옵니다 (저장된 주소는 곧 만료됩니다)
+  photoSlots.forEach(async ({slot, list})=>{
+    const signed = await signFiles(list);
+    const box = document.getElementById(slot);
+    if(!box) return;
+    box.innerHTML = signed.map(f=>
+      f.url ? `<div class="thumb"><img src="${esc(f.url)}" alt="${esc(f.name||'')}"
+                 onclick="window.open('${esc(f.url)}','_blank','noopener')">
+                 <div class="cap">${esc(f.name||'')}</div></div>`
+            : `<div class="thumb"><div class="cap">${esc(f.name||'사진')} (열 수 없음)</div></div>`
+    ).join('');
+  });
 }
 </script>
 </body>
