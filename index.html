@@ -436,6 +436,26 @@ table.lu th,table.lu td{white-space:nowrap}
 table.lu td input[type="text"]{width:130px;padding:4px 7px;font-size:14.5px}
 table.lu td select{padding:4px 7px;font-size:14.5px}
 
+/* 운영 기록 — 달마다 채워야 하는 것이라, 빈 달이 눈에 띄게 */
+.ops-list{display:flex;flex-direction:column;gap:14px}
+.ops{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);
+  border-radius:var(--radius);padding:16px 18px}
+.ops-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.ops-name{font-size:19px;font-weight:700}
+.ops-months{display:flex;gap:5px;flex-wrap:wrap}
+.mo{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  width:44px;height:44px;border-radius:var(--radius-sm);border:1px solid var(--line);
+  background:#fff;line-height:1.15}
+.mo b{font-size:12.5px;font-weight:600;color:var(--sub)}
+.mo i{font-style:normal;font-size:14px;font-weight:700;min-height:17px}
+.mo.full{background:var(--accent);border-color:var(--accent)}
+.mo.full b,.mo.full i{color:#fff}
+.mo.part{background:var(--warn-soft);border-color:#e8b6b1}
+.mo.part b,.mo.part i{color:var(--warn)}
+.mo.none{background:var(--warn-soft);border-color:var(--warn);border-style:dashed}
+.mo.none b{color:var(--warn)}
+.mo.future{opacity:.4}
+
 /* 게시판 — 오래 읽는 글이므로 본문을 크고 넉넉하게 둡니다 */
 .post-body{white-space:pre-wrap;font-size:18px;line-height:1.9;margin-top:18px;
   max-width:64ch;color:var(--ink)}
@@ -651,7 +671,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-03 리스트업';
+const APP_VERSION = '2026-09-03 운영기록';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -665,8 +685,12 @@ const TOP_NAV_FORMS = [
 ];
 // 낱말 목록으로 폼 하나를 찾습니다. 앞에 적은 낱말일수록 먼저 맞춰 봅니다.
 function findForm(words){
+  // 운영 기록 폼(회의 기록·상담사 교육·홍보 실적·콜센터)은 «운영 기록» 탭에 따로 있으므로
+  // 여기서는 건너뜁니다. 그러지 않으면 '상담사 교육'이 낱말 '교육'에 걸려
+  // 간담회/교육 자리를 빼앗고, 상담사 화면에도 떠 버립니다.
+  const pool = (S.forms||[]).filter(x => !x.manager_only);
   for(const w of words){
-    const f = (S.forms||[]).find(x => String(x.title||'').includes(w));
+    const f = pool.find(x => String(x.title||'').includes(w));
     if(f) return f;
   }
   return null;
@@ -1082,6 +1106,12 @@ function renderTabs(){
   // 게시판은 상담사도 씁니다 (읽고 답글 달기). 그래서 폼 옆에 둡니다.
   t.insertAdjacentHTML('beforeend',
     `<button data-tab="board" onclick="openTab('board')">게시판</button>`);
+  // 운영 기록(회의·상담사 교육·홍보·콜센터)은 중간관리자가 적습니다.
+  // 성과지표의 210점이 여기서 나오므로 상단에 자리를 줍니다.
+  if(canManage() && opsForms().length){
+    t.insertAdjacentHTML('beforeend',
+      `<button data-tab="ops" onclick="openTab('ops')">운영 기록</button>`);
+  }
   if(canManage()){
     t.insertAdjacentHTML('beforeend',
       `<button data-tab="list" onclick="openTab('list')">기록 목록</button>
@@ -1134,6 +1164,7 @@ function showTab(tab){
   if(mode==='home'){ renderHome(); return; }
   if(mode==='myclients'){ showMyClients(); return; }
   if(mode==='board'){ renderBoard(id); return; }   // id가 있으면 그 글을 폅니다
+  if(mode==='ops'){ renderOps(); return; }
   if(mode==='stats'){ renderStats(); return; }
   if(mode==='admin'){ renderAdmin(id); return; }
   if(mode==='list'){
@@ -1152,6 +1183,15 @@ function showTab(tab){
    ═══════════════════════════════════════════════════ */
 async function renderForm(){
   const c=$('content');
+  // 운영 기록(회의·상담사 교육·홍보·콜센터)은 관리자가 적습니다.
+  // 화면에서 단추를 감추는 것만으로는 주소를 직접 쳐서 들어올 수 있으므로 여기서도 막습니다.
+  if(S.form?.manager_only && !canManage()){
+    c.innerHTML = `<div class="panel"><div class="msg bad">
+      '${esc(S.form.title)}'은(는) 관리자가 적는 기록입니다.
+      <div class="hint" style="margin-top:6px;color:inherit">
+        내용은 «기록 목록»에서 보실 수 있습니다.</div></div></div>`;
+    return;
+  }
   c.innerHTML='<div class="panel"><div class="empty">불러오는 중…</div></div>';
 
   const { data: fields, error } = await sb.from('form_fields').select('*')
@@ -2688,6 +2728,128 @@ function renderAdmin(sub){
   else if(sub==='upload') adminUpload();
   else if(sub==='settings') adminSettings();
   else adminUsers();
+}
+
+/* ═══════════════════════════════════════════════════
+   운영 기록 — 성과지표를 채우는 회의·교육·홍보·콜센터 기록
+
+   성과지표 16개 중 다섯 개는 «상담»이 아니라 «운영»을 셉니다. 그 기록을 적을
+   자리가 없어서 지금까지는 연말에 손으로 세야 했습니다. patch27이 폼 네 개를
+   만들고, 이 화면이 그 입구가 됩니다.
+
+   새 화면을 따로 만들지 않고 폼 엔진에 얹었기 때문에, 인쇄·한글(.hwpx) 보고서·
+   기록 목록·휴지통·통계가 전부 그대로 따라옵니다.
+
+   여기서 한 가지 더 하는 일: 지표 1·2·3은 «월 1회(또는 월 2회) 개최»가 곧
+   점수입니다. 그래서 폼마다 올해 열두 달 중 어느 달이 비어 있는지 한눈에
+   보여 줍니다. 12월에 몰아서 세다가 빠진 달을 발견하는 일을 막기 위해서입니다.
+   ═══════════════════════════════════════════════════ */
+
+// 관리자만 쓰는 폼들 (patch27의 manager_only). 아직 커리를 안 돌렸으면 빈 목록입니다.
+function opsForms(){
+  return (S.forms||[]).filter(f=>f.manager_only && f.is_active !== false)
+    .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+}
+// 이 폼이 한 달에 몇 번 있어야 하는가 — 점수표에 적힌 값입니다.
+// 없는 폼은 달마다 세지 않고 건수만 셉니다.
+const OPS_MONTHLY_GOAL = [
+  [/회의/, 1, '성과지표 1·2 — 월 1회 개최가 각 20점입니다'],
+  [/상담사 교육/, 2, '성과지표 3 — 월 2회(연 24회) 개최가 20점입니다'],
+  [/홍보/, 1, '성과지표 5 — 월 1회 배포가 10점입니다'],
+  [/콜센터/, 1, '성과지표 8 — 달마다 한 줄씩 적습니다'],
+];
+function opsGoalOf(title){
+  for(const [re, n, why] of OPS_MONTHLY_GOAL) if(re.test(String(title||''))) return { n, why };
+  return null;
+}
+
+async function renderOps(){
+  const c = $('content');
+  const forms = opsForms();
+  if(!canManage()){
+    c.innerHTML = `<div class="panel"><div class="msg bad">운영 기록은 관리자가 적습니다.
+      기록을 보시려면 «기록 목록»에서 폼을 골라 주세요.</div></div>`;
+    return;
+  }
+  if(!forms.length){
+    c.innerHTML = `<div class="panel">
+      <h2>운영 기록</h2>
+      <div class="msg info">아직 운영 기록 폼이 없습니다.
+        <b>patch27_ops_forms.sql</b> 커리를 먼저 실행해 주세요.
+        <div class="hint" style="margin-top:8px;color:inherit">
+          회의 기록 · 상담사 교육 · 홍보 실적 · 콜센터 운영일지 네 가지가 만들어집니다.</div>
+      </div></div>`;
+    return;
+  }
+
+  const year = S._opsYear || new Date().getFullYear();
+  c.innerHTML = `<div class="panel">
+    <h2>운영 기록</h2>
+    <div class="desc">성과지표에서 «상담»이 아니라 «운영»을 세는 항목들입니다.
+      평소에 적어 두면 연말에 손으로 세지 않아도 됩니다.</div>
+    <div class="filter-bar">
+      <select id="opsYear" onchange="S._opsYear=+this.value;renderOps()">
+        ${[0,1,2].map(i=>{const y=new Date().getFullYear()-i;
+          return `<option value="${y}" ${y===year?'selected':''}>${y}년</option>`;}).join('')}
+      </select>
+      <span class="hint">칸이 찬 달은 기록이 있는 달입니다. 빈 달을 눈으로 찾으시라고 둔 줄입니다.</span>
+    </div>
+    <div id="opsBody"><div class="empty">불러오는 중…</div></div>
+  </div>`;
+
+  // 올해 기록을 폼별·월별로 셉니다
+  const ids = forms.map(f=>f.id);
+  const { data, error } = await sb.from('form_records').select('form_id,data,created_at')
+    .in('form_id', ids).limit(5000);
+  const box = $('opsBody');
+  if(error){ box.innerHTML = `<div class="msg bad">${esc(error.message)}</div>`; return; }
+
+  // 각 폼의 날짜 항목을 알아야 '몇 월 기록인지' 셀 수 있습니다
+  const { data: ff } = await sb.from('form_fields').select('form_id,field_key,field_type,sort_order')
+    .in('form_id', ids).limit(500);
+  const dateKey = {};
+  (ff||[]).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0))
+    .forEach(x=>{ if(x.field_type==='date' && !dateKey[x.form_id]) dateKey[x.form_id]=x.field_key; });
+
+  const cnt = {};   // cnt[form_id][1..12]
+  forms.forEach(f=>{ cnt[f.id] = Array(13).fill(0); });
+  (data||[]).forEach(r=>{
+    const k = dateKey[r.form_id];
+    const ds = String((k ? r.data?.[k] : null) || r.created_at || '').slice(0,10);
+    if(ds.slice(0,4) !== String(year)) return;
+    const m = parseInt(ds.slice(5,7), 10);
+    if(m>=1 && m<=12 && cnt[r.form_id]) cnt[r.form_id][m]++;
+  });
+
+  box.innerHTML = `<div class="ops-list">${forms.map(f=>{
+    const g = opsGoalOf(f.title);
+    const c12 = cnt[f.id] || [];
+    const total = c12.reduce((a,b)=>a+b, 0);
+    const missing = g ? Array.from({length:12},(_,i)=>i+1).filter(m=>c12[m] < g.n) : [];
+    // 지난 달까지만 따집니다. 아직 오지 않은 달을 '빠졌다'고 할 수는 없습니다.
+    const thisMonth = (year === new Date().getFullYear()) ? new Date().getMonth()+1 : 12;
+    const late = missing.filter(m=>m <= thisMonth);
+    return `<div class="ops">
+      <div class="ops-head">
+        <span class="ops-name">${esc(f.title)}</span>
+        <span class="tag">${total}건</span>
+        ${g && late.length
+          ? `<span class="tag risk">${late.length}개 달 모자람</span>`
+          : g ? `<span class="tag">${thisMonth}월까지 채움</span>` : ''}
+        <span style="flex:1"></span>
+        <button class="btn" onclick="openTab('form:${f.id}')">새로 쓰기</button>
+        <button class="btn ghost" onclick="openTab('list:${f.id}')">기록 보기</button>
+      </div>
+      <div class="hint" style="margin:0 0 10px">${esc(f.description||'')}${
+        g ? ` <b style="color:var(--accent-dark)">${esc(g.why)}</b>` : ''}</div>
+      ${g ? `<div class="ops-months">${Array.from({length:12},(_,i)=>{
+        const m = i+1, n = c12[m]||0;
+        const state = n >= g.n ? 'full' : (n > 0 ? 'part' : (m <= thisMonth ? 'none' : 'future'));
+        return `<span class="mo ${state}" title="${m}월 ${n}건">
+          <b>${m}</b><i>${n||''}</i></span>`;
+      }).join('')}</div>` : ''}
+    </div>`;
+  }).join('')}</div>`;
 }
 
 /* ═══════════════════════════════════════════════════
