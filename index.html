@@ -765,7 +765,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-03 본부별보기';
+const APP_VERSION = '2026-09-04 문항잠금';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -8888,8 +8888,14 @@ async function adminSurvey(){
 }
 
 function renderSurveyAdmin(){
+  /* «문항 고치기»는 최종관리자만. survey_questions 표는 지역이 없는 한 벌이라,
+     한 본부가 고치면 다른 본부 대원 화면과 지표 계산까지 함께 바뀝니다.
+     설문지는 소방청이 준 전국 공통 양식이므로 «폼과 항목»과 같게 막아 둡니다. */
   const tabs = [['office','관서별 만족도'],['item','문항별 빈도·비율'],
-                ['cross','교차분석'],['edit','문항 고치기'],['link','설문 링크']];
+                ['cross','교차분석']]
+    .concat(isSuper() ? [['edit','문항 고치기']] : [])
+    .concat([['link','설문 링크']]);
+  if(SV_TAB==='edit' && !isSuper()) SV_TAB = 'office';
   let html = `<div class="panel">
     <h2>만족도 설문</h2>
     <div class="desc">성과지표 13번(60점)에 쓰이는 설문입니다.
@@ -9219,8 +9225,15 @@ function svTabEdit(){
 
   return `<div class="panel">
     <div class="section-title">설문 문항</div>
+    <div class="msg bad">이 문항은 <b>모든 본부가 함께 씁니다.</b> 여기서 고치면
+      다른 본부 대원이 보는 설문지도 그 자리에서 바뀌고, 이미 받은 응답도
+      새 문구 아래에 붙어 보입니다. 설문지는 소방청이 준 전국 공통 양식이니
+      담당자에게 확인한 뒤에 고쳐 주세요.
+      <div class="hint" style="margin-top:6px;color:inherit">
+        특히 <b>«도움정도» 체크를 옮기면 모든 본부의 성과지표 13번 점수가
+        소급해서 달라집니다.</b> 문항을 아주 지우면 이미 받은 점수가 표에서
+        사라지니, 쓰지 않을 문항은 지우지 말고 «사용» 체크만 꺼 두세요.</div></div>
     <div class="msg info">문항은 실제 설문지(구글 폼) 원문 그대로 들어 있습니다.
-      여기서 고치면 대원이 보는 화면에 바로 반영됩니다.
       <div class="hint" style="margin-top:6px;color:inherit">
         <b>«도움정도»에 표시한 문항</b>(지금 ${helpNos||'없음'}번)의 평균이 성과지표 13번 점수입니다.
         내보니가 세던 대로 12~18번으로 두었습니다. 설문지의 구역 제목만 보면
