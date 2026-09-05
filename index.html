@@ -777,7 +777,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-09-04 상위지역큐알';
+const APP_VERSION = '2026-09-05 응답목록';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -8877,7 +8877,7 @@ function renderSurveyAdmin(){
      한 본부가 고치면 다른 본부 대원 화면과 지표 계산까지 함께 바뀝니다.
      설문지는 소방청이 준 전국 공통 양식이므로 «폼과 항목»과 같게 막아 둡니다. */
   const tabs = [['office','관서별 만족도'],['item','문항별 빈도·비율'],
-                ['cross','교차분석']]
+                ['cross','교차분석'],['rows','응답 목록']]
     .concat(isSuper() ? [['edit','문항 고치기']] : [])
     .concat([['link','설문 링크']]);
   if(SV_TAB==='edit' && !isSuper()) SV_TAB = 'office';
@@ -8901,6 +8901,7 @@ function renderSurveyAdmin(){
   if(SV_TAB==='office')      html += svTabOffice();
   else if(SV_TAB==='item')   html += svTabItem();
   else if(SV_TAB==='cross')  html += svTabCross();
+  else if(SV_TAB==='rows')   html += svTabRows();
   else if(SV_TAB==='edit')   html += svTabEdit();
   else                       html += svTabLink();
 
@@ -9175,6 +9176,70 @@ function svTabCross(){
     </div>`;
   });
   return out;
+}
+
+/* ── 탭 : 응답 목록 ──
+   설문은 로그인 없이 누구나 넣을 수 있습니다. 그래서 시험 삼아 넣어 본 것,
+   장난으로 넣은 것, 같은 사람이 두 번 넣은 것이 섞일 수 있습니다.
+   그런 응답이 남아 있으면 «설문 실시 인원»이 부풀어 성과지표 13번의 실시율이
+   실제보다 높게 나옵니다. 그래서 한 건씩 보고 지울 수 있어야 합니다.
+   지우는 것은 관리자만, 그것도 자기 지역만 됩니다(patch28·30의 규칙). */
+function svTabRows(){
+  if(!SV_DATA.length)
+    return `<div class="panel"><div class="empty">이 기간에 들어온 응답이 없습니다.</div></div>`;
+
+  const canDel = canManage();
+  const rows = SV_DATA.map((r,i)=>{
+    const help = svPersonHelpAvg(r);
+    const said = SV_Q.filter(q=>q.kind==='text')
+      .map(q=>(r.answers?.[q.qkey]||'').trim()).filter(Boolean);
+    const gripes = Array.isArray(r.answers?.q19) ? r.answers.q19 : [];
+    return `<tr>
+      ${canDel?`<td onclick="event.stopPropagation()">
+        <input type="checkbox" name="svpick" value="${esc(r.id)}"
+          style="width:17px;height:17px;cursor:pointer"></td>`:''}
+      <td class="nowrap">${fmtDate(r.created_at)}</td>
+      <td class="ell">${esc(r.office || regionNameOf(r.region_id) || '미지정')}</td>
+      <td class="nowrap">${esc([r.gender,r.age_band].filter(Boolean).join(' '))}</td>
+      <td class="ell">${esc([r.rank,r.job].filter(Boolean).join(' · '))}</td>
+      <td class="nowrap">${esc(r.exp_band||'')}</td>
+      <td class="ell">${esc((Array.isArray(r.services)?r.services:[]).join(', '))}</td>
+      <td class="hi">${help===null?'—':svFix(help)}</td>
+      <td class="ell" title="${esc(said.join(' / '))}">${
+        said.length ? esc(said.join(' / ')) : '<span style="color:var(--sub)">—</span>'}</td>
+      <td class="ell">${gripes.length?esc(gripes.join(', ')):'<span style="color:var(--sub)">—</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="panel">
+    <div class="filter-bar">
+      <div class="section-title" style="margin:0;flex:1">응답 한 건씩 보기 (${SV_DATA.length}명)</div>
+      ${canDel?`<button class="btn ghost" onclick="svPickAll(true)">모두 고르기</button>
+      <button class="btn ghost" onclick="svPickAll(false)">고른 것 풀기</button>
+      <button class="btn ghost" onclick="svDeletePicked()">고른 응답 지우기</button>`:''}
+      <button class="btn ghost" onclick="svCopyTable('svTR')">표 복사</button>
+    </div>
+    ${canDel?`<div class="msg info">시험 삼아 넣어 본 응답은 여기서 지워 주세요.
+      남아 있으면 «설문 실시 인원»에 함께 세어져 성과지표 13번의 실시율이
+      실제보다 높게 나옵니다. 지운 응답은 되돌릴 수 없습니다(휴지통에 가지 않습니다).</div>`:''}
+    <div class="scroll-x"><table class="list-table lu" id="svTR">
+      <thead><tr>${canDel?'<th style="width:34px"></th>':''}
+        <th>제출</th><th>소속</th><th>성별·연령</th><th>직급·업무</th><th>근무기간</th>
+        <th>이용 서비스</th><th>도움정도</th><th>적어 준 말</th><th>불만사항</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+  </div>`;
+}
+function svPickAll(on){
+  document.querySelectorAll('input[name="svpick"]').forEach(c=>c.checked = on);
+}
+async function svDeletePicked(){
+  const ids = [...document.querySelectorAll('input[name="svpick"]:checked')].map(c=>c.value);
+  if(!ids.length){ toast('지울 응답을 골라 주세요','bad'); return; }
+  if(!confirm(`응답 ${ids.length}건을 지웁니다.\n되돌릴 수 없습니다. 계속할까요?`)) return;
+  const { error } = await sb.from('survey_responses').delete().in('id', ids);
+  if(error){ toast('지우지 못했습니다: '+error.message,'bad'); return; }
+  toast(`${ids.length}건을 지웠습니다`);
+  adminSurvey();
 }
 
 /* ── 탭 4 : 문항 고치기 ── */
