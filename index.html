@@ -1101,8 +1101,8 @@ async function enterApp(){
     S.regions = (allRegions||[]).filter(r=>seed.has(r.id));
   }
 
-  const { data: forms } = await sb.from('forms').select('*').eq('is_active',true).order('sort_order');
-  S.forms = forms || [];
+  const { data: rawForms } = await sb.from('forms').select('*').eq('is_active',true).order('sort_order');
+  S.forms = filterFormsByRegion(rawForms || []);
 
   await loadLookups();
 
@@ -1115,6 +1115,26 @@ async function enterApp(){
   // 주소에 화면이 적혀 있으면 그 화면으로 (새로고침·즐겨찾기 대비)
   if(location.hash.length > 1) routeFromHash();
   else openTab('home', { replace:true });
+}
+/* ── 지역별 서식(메뉴) 격리 ──────────────────────────────────────────
+   전지역 공통 서식(region_id == null)과 사용자가 배정받은 상위지역 전용 서식만 골라냅니다.
+   동일한 slug의 지역 전용 서식이 있으면 공통 서식 대신 지역 전용 서식을 우선 매핑(Override)합니다.
+   최종관리자(super_admin)는 전체 서식을 볼 수 있습니다. */
+function filterFormsByRegion(forms){
+  if(isSuper()) return forms || [];
+  const myTops = new Set(topRegionsForMe().map(r => r.id));
+  const accessible = (forms || []).filter(f => !f.region_id || myTops.has(f.region_id));
+
+  // 지역 전용 서식 우선 매핑 (동일 slug일 때 region_id가 있는 것이 공통을 덮어씀)
+  const byKey = new Map();
+  accessible.forEach(f => {
+    const key = f.slug || f.id;
+    const existing = byKey.get(key);
+    if(!existing || (!existing.region_id && f.region_id)){
+      byKey.set(key, f);
+    }
+  });
+  return Array.from(byKey.values()).sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
 }
 
 /* ── 선택지 마스터 불러오기 (상세소속·직급·직무) ── */
@@ -2074,7 +2094,53 @@ function pickClient(c){
   renderClientArea();
   applyAutoFill();          // 생년월일 → 연령대 자동 채움
   prefillFromClient(c);     // 명부의 소속·직급을 폼에도 옮겨 적는다
+  loadAndPrefillRecentStress(c.id); // 최근 상담 기록에서 주요 스트레스 요인 자동 불러오기
 }
+
+/* ── 최근 상담의 주요 스트레스 요인 자동 불러오기 ────────────────────────
+   모든 개별 상담(집단상담 제외)에서 내담자를 선택했을 때,
+   해당 내담자의 최근 상담 기록(form_records)에 기재된 스트레스 요인을 자동으로 채워넣습니다.
+   상담사가 필요에 따라 언제든 다른 옵션으로 수정할 수 있도록 안내 배지를 함께 표시합니다. */
+async function loadAndPrefillRecentStress(clientId){
+  if(!clientId || isGroupForm()) return;
+  const stressField = (S.fields||[]).find(f =>
+    /stress/i.test(f.field_key) || /스트레스/.test(f.label||'')
+  );
+  if(!stressField) return;
+
+  const fldId = 'fld_' + stressField.field_key;
+  const el = $(fldId);
+  if(!el) return;
+
+  try{
+    const { data: past, error } = await sb.from('form_records')
+      .select('data, created_at')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if(error || !past?.length) return;
+
+    for(const rec of past){
+      if(!rec.data) continue;
+      const val = rec.data[stressField.field_key]
+        || rec.data.stress_factor
+        || rec.data.stress
+        || rec.data['주요스트레스원']
+        || rec.data['주요 스트레스 요인'];
+      if(val){
+        if(setSelectValue(fldId, val)){
+          el.classList.add('prefilled');
+          const dateStr = rec.created_at ? rec.created_at.slice(0, 10) : '';
+          markPrefill(stressField, `최근 상담(${dateStr})에서 선택된 스트레스 요인입니다 (수정 가능)`);
+        }
+        break;
+      }
+    }
+  }catch(e){
+    console.warn('loadAndPrefillRecentStress failed:', e);
+  }
+}
+
 /* 명부에 있는 값을 폼의 같은 뜻 항목에 미리 채워 준다.
    상담사가 매번 같은 걸 다시 고르지 않도록 하되, 언제든 고칠 수 있게 입력칸에 값만 넣는다.
    폼마다 항목 이름이 달라도 아래 대응표로 찾아간다. */
