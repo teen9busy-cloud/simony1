@@ -1516,6 +1516,7 @@ async function renderForm(){
     renderClientArea();     // 상세페이지에서 넘어온 경우 미리 선택된 상태로
     applyAutoFill();
     prefillFromClient(S.client);
+    loadAndPrefillRecentStress(S.client.id); // 상세페이지에서 넘어온 경우에도 최근 스트레스 요인 자동 불러오기
   }
 }
 
@@ -2097,9 +2098,53 @@ function pickClient(c){
   loadAndPrefillRecentStress(c.id); // 최근 상담 기록에서 주요 스트레스 요인 자동 불러오기
 }
 
+/* ── 스트레스 요인 옵션 스마트 매칭 헬퍼 ────────────────────────
+   과거 서식의 '주요스트레스원'(예: '1-6. 업무질 변화', '6. 기타(하단 텍스트 작성)')과
+   현재 폼의 옵션('1-6. 업무질 변화', '6. 기타')이 포맷이 약간 다르더라도 정확히 매칭합니다. */
+function findMatchingStressOption(sel, rawVal){
+  if(!sel || !rawVal) return null;
+  const opts = [...sel.options].map(o => o.value).filter(Boolean);
+  if(!opts.length) return null;
+
+  const vStr = String(rawVal).trim();
+  // 1. 정확 일치
+  if(opts.includes(vStr)) return vStr;
+
+  // 2. 공백 무시 일치
+  const noSpace = s => s.replace(/\s+/g, '');
+  const nsMatch = opts.find(o => noSpace(o) === noSpace(vStr));
+  if(nsMatch) return nsMatch;
+
+  // 3. 코드 번호 일치 (예: '1-6.' 또는 '1-6')
+  const vCode = vStr.match(/^(\d+(?:-\d+)?)/)?.[1];
+  if(vCode){
+    const codeMatch = opts.find(o => {
+      const oCode = o.trim().match(/^(\d+(?:-\d+)?)/)?.[1];
+      return oCode && oCode === vCode;
+    });
+    if(codeMatch) return codeMatch;
+  }
+
+  // 4. 번호 제거 후 핵심 텍스트 일치 (예: '업무질 변화')
+  const cleanText = s => s.replace(/^\d+(?:-\d+)?[\.\s]*/, '').replace(/\s+/g, '');
+  const vClean = cleanText(vStr);
+  if(vClean && vClean.length >= 2){
+    const textMatch = opts.find(o => cleanText(o) === vClean || cleanText(o).includes(vClean) || vClean.includes(cleanText(o)));
+    if(textMatch) return textMatch;
+  }
+
+  // 5. '기타' 매칭
+  if(vStr.includes('기타')){
+    const otherMatch = opts.find(o => o.includes('기타'));
+    if(otherMatch) return otherMatch;
+  }
+
+  return null;
+}
+
 /* ── 최근 상담의 주요 스트레스 요인 자동 불러오기 ────────────────────────
-   모든 개별 상담(집단상담 제외)에서 내담자를 선택했을 때,
-   해당 내담자의 최근 상담 기록(form_records)에 기재된 스트레스 요인을 자동으로 채워넣습니다.
+   모든 개별 상담(집단상담 제외)에서 내담자를 선택했을 때(검색 또는 상세화면 작성 단추),
+   해당 내담자의 최근 상담 기록에 기재된 스트레스 요인을 자동으로 채워넣습니다.
    상담사가 필요에 따라 언제든 다른 옵션으로 수정할 수 있도록 안내 배지를 함께 표시합니다. */
 async function loadAndPrefillRecentStress(clientId){
   if(!clientId || isGroupForm()) return;
@@ -2113,27 +2158,40 @@ async function loadAndPrefillRecentStress(clientId){
   if(!el) return;
 
   try{
-    const { data: past, error } = await sb.from('form_records')
-      .select('data, created_at')
-      .eq('client_id', clientId)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    if(error || !past?.length) return;
+    // 상세페이지(showClient)에서 이미 가져온 최근 기록이 있으면 네트워크 지연 없이 즉시 사용
+    let past = (S._cRecs && S._cRecs.length && S._cRecs[0]?.client_id === clientId)
+      ? S._cRecs : null;
+
+    if(!past || !past.length){
+      const { data, error } = await sb.from('form_records')
+        .select('data, created_at')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if(error || !data?.length) return;
+      past = data;
+    }
 
     for(const rec of past){
       if(!rec.data) continue;
-      const val = rec.data[stressField.field_key]
+      const rawVal = rec.data[stressField.field_key]
         || rec.data.stress_factor
         || rec.data.stress
         || rec.data['주요스트레스원']
         || rec.data['주요 스트레스 요인'];
-      if(val){
-        if(setSelectValue(fldId, val)){
+      if(rawVal){
+        const matched = findMatchingStressOption(el, rawVal);
+        if(matched && setSelectValue(fldId, matched)){
           el.classList.add('prefilled');
           const dateStr = rec.created_at ? rec.created_at.slice(0, 10) : '';
           markPrefill(stressField, `최근 상담(${dateStr})에서 선택된 스트레스 요인입니다 (수정 가능)`);
+          // 만약 '기타' 항목이고 원본에 텍스트가 적혀 있었다면 직접입력칸에도 보존
+          if(matched.includes('기타') && typeof rawVal === 'string'){
+            const otherInput = $(fldId + '_other');
+            if(otherInput && !otherInput.value) otherInput.value = rawVal;
+          }
+          break;
         }
-        break;
       }
     }
   }catch(e){
