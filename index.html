@@ -777,7 +777,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-10-01 설문장기';
+const APP_VERSION = '2026-10-01 다각통계';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -1119,7 +1119,8 @@ async function enterApp(){
 /* ── 지역별 서식(메뉴) 격리 ──────────────────────────────────────────
    전지역 공통 서식(region_id == null)과 사용자가 배정받은 상위지역 전용 서식만 골라냅니다.
    동일한 slug의 지역 전용 서식이 있으면 공통 서식 대신 지역 전용 서식을 우선 매핑(Override)합니다.
-   최종관리자(super_admin)는 전체 서식을 볼 수 있습니다. */
+   최종관리자(super_admin)는 전체 서식을 볼 수 있습니다.
+   (주의: 이 함수는 화면 메뉴 및 작성 대상 서식의 편의상 필터링이며, 실제 레코드 접근 권한은 Supabase DB의 RLS 정책이 완전히 통제합니다.) */
 function filterFormsByRegion(forms){
   if(isSuper()) return forms || [];
   const myTops = new Set(topRegionsForMe().map(r => r.id));
@@ -2185,10 +2186,15 @@ async function loadAndPrefillRecentStress(clientId){
           el.classList.add('prefilled');
           const dateStr = rec.created_at ? rec.created_at.slice(0, 10) : '';
           markPrefill(stressField, `최근 상담(${dateStr})에서 선택된 스트레스 요인입니다 (수정 가능)`);
-          // 만약 '기타' 항목이고 원본에 텍스트가 적혀 있었다면 직접입력칸에도 보존
-          if(matched.includes('기타') && typeof rawVal === 'string'){
+          // 만약 '기타' 항목이고 원본에 직접 작성된 텍스트가 있었다면 직접입력칸에 보존
+          if(matched.includes('기타')){
+            const rawOther = rec.data[stressField.field_key + '_other']
+              || rec.data.stress_factor_other
+              || rec.data.stress_other
+              || rec.data['주요스트레스원_other']
+              || (typeof rawVal === 'string' && !rawVal.includes('기타(하단') && !rawVal.startsWith('6.') ? rawVal : '');
             const otherInput = $(fldId + '_other');
-            if(otherInput && !otherInput.value) otherInput.value = rawVal;
+            if(otherInput && !otherInput.value && rawOther) otherInput.value = rawOther;
           }
           break;
         }
@@ -7370,8 +7376,1271 @@ async function adminSimple(){
      예/아니오               → 예·아니오 비율
      글·파일                 → 집계하지 않음
    ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   시모니 1.0 통계 엔진
+   1) 다각도 종합 통계 (renderMultiStats) — 5대 상담 + 긴급콜 + 집단상담 종합,
+      관서별 현황, 4회기 이상 심층상담 누적 실인원, 인구사회학적 분포, 요인 및 조치 분석
+   2) 서식별 단일 통계 (renderSingleFormStats) — 기존 단일 폼 항목별 자동 집계
+   ═══════════════════════════════════════════════════ */
+
+const STATS_DEFAULT_START = '2026-10-01';
+
 async function renderStats(){
-  const c=$('content');
+  const c = $('content');
+  const sub = S._statSubTab || 'multi';
+  S._statSubTab = sub;
+
+  c.innerHTML = `
+    <div style="display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap">
+      <button class="btn ${sub==='multi'?'':'ghost'}" onclick="setStatSubTab('multi')" style="font-weight:700">
+        📊 다각도 종합 통계
+      </button>
+      <button class="btn ${sub==='single'?'':'ghost'}" onclick="setStatSubTab('single')">
+        📋 서식별 단일 통계
+      </button>
+      <div class="spacer"></div>
+      <span class="hint">소방청 분기 보고서(HWP) 및 현장 상담실적 양식 완벽 호환</span>
+    </div>
+    <div id="statSubContainer"></div>
+  `;
+
+  if(sub === 'single'){
+    await renderSingleFormStats();
+  } else {
+    await renderMultiStats();
+  }
+}
+
+function setStatSubTab(tab){
+  S._statSubTab = tab;
+  renderStats();
+}
+
+/* ───────────────────────────────────────────────────
+   1) 다각도 종합 통계 (renderMultiStats)
+   ─────────────────────────────────────────────────── */
+const MULTI_TARGET_SLUGS = ['screening', 'indepth', 'lifecycle', 'disaster', 'emergency', 'call', 'group', 'ops-callcenter'];
+
+// 소방청 표준 28개 스트레스원 (운영 DB form_fields 실제 라벨과 100% 일치)
+const STRESS_DEFS = [
+  { code: '1-1', label: '인사이동' },
+  { code: '1-2', label: '승진누락' },
+  { code: '1-3', label: '징계연류' },
+  { code: '1-4', label: '과중한 책임' },
+  { code: '1-5', label: '업무량 변화' },
+  { code: '1-6', label: '업무질 변화' },
+  { code: '1-7', label: '근로시간' },
+  { code: '1-8', label: '교대근무' },
+  { code: '1-9', label: '직무요구도' },
+  { code: '1-10', label: '직무자율성' },
+  { code: '1-11', label: '노력보상 불균형' },
+  { code: '1-12', label: '직업 불안정성' },
+  { code: '1-13', label: '감정노동' },
+  { code: '2-1', label: '직장내 폭력' },
+  { code: '2-2', label: '민원인 폭력' },
+  { code: '2-3', label: '직장 내 성희롱' },
+  { code: '2-4', label: '동료의 지지부족' },
+  { code: '2-5', label: '상사의 지지부족' },
+  { code: '3-1', label: '업무관련사고' },
+  { code: '3-2', label: '외상사건 노출현장 출동' },
+  { code: '4-1', label: '일과 가정 불균형' },
+  { code: '4-2', label: '본인의 사건' },
+  { code: '4-3', label: '주거환경의 변화' },
+  { code: '4-4', label: '금전관계' },
+  { code: '5-1', label: '부부의 사건' },
+  { code: '5-2', label: '자녀의 사건' },
+  { code: '5-3', label: '가족의 사망' },
+  { code: '5-4', label: '가족과의 관계' },
+  { code: '5-5', label: '타인과의 관계' }
+];
+
+const PROB_DEFS = [
+  { code: '1', label: '정상' },
+  { code: '2', label: 'PTSD' },
+  { code: '3', label: '우울감' },
+  { code: '4', label: '수면문제' },
+  { code: '5', label: '알코올 문제' },
+  { code: '6', label: '행위중독' },
+  { code: '7', label: '자살관련' },
+  { code: '8', label: '불안장애' },
+  { code: '9', label: '정신증' },
+  { code: '10', label: '직무스트레스' },
+  { code: '11', label: '기타' }
+];
+
+function normalizeMultiJob(rawJob, rawDuty){
+  const j = String(rawJob || '').trim();
+  const d = String(rawDuty || '').trim();
+  const src = j || d;
+  if(!src) return '';
+  const m = src.match(/^([1-7])\s*\./);
+  if(m){
+    const map = {
+      '1': '1. 화재진압', '2': '2. 화재운전', '3': '3. 구조(운전포함)',
+      '4': '4. 구급(운전포함)', '5': '5. 상황실', '6': '6. 화재조사', '7': '7. 행정업무'
+    };
+    return map[m[1]] || '8. 기타';
+  }
+  if(src.match(/^8\s*\./)) return '8. 기타';
+  if(src === '화재진압') return '1. 화재진압';
+  if(src === '구조') return '3. 구조(운전포함)';
+  if(src === '구급') return '4. 구급(운전포함)';
+  if(src === '상황실') return '5. 상황실';
+  if(src === '행정') return '7. 행정업무';
+  if(src === '화재조사') return '6. 화재조사';
+  if(['운전', '예방', '지휘', '기타'].includes(src)) return '8. 기타';
+  return '8. 기타';
+}
+
+function normalizeMultiRank(raw){
+  const s = String(raw || '').trim();
+  if(!s) return '미상';
+  if(['소방사','소방교','소방장','소방위','소방경'].includes(s)) return s;
+  if(['소방령','소방정','소방준감','소방감','소방감 이상'].includes(s)) return '소방령 이상';
+  if(['소방정대원','의무소방','일반직','소방보조인력(사회복무요원등)','기타'].includes(s)) return '기타';
+  return '기타';
+}
+
+function normalizeMultiAction(act){
+  const s = String(act || '').trim();
+  if(!s) return '';
+  if(s.includes('지속관리') || s.startsWith('1.')) return '지속관리';
+  if(s.includes('치료연계') || s.startsWith('2.')) return '치료연계';
+  if(s.includes('전문기관') || s.startsWith('3.')) return '전문기관연계';
+  if(s.includes('정보제공') || s.startsWith('4.')) return '정보제공';
+  if(s.includes('기타조치') || s.startsWith('5.')) return '기타조치';
+  if(s.includes('상담종료') || s.startsWith('6.')) return '상담종료(전근,퇴사시)';
+  return '기타조치';
+}
+
+function normalizeMultiMethod(t){
+  const s = String(t || '').trim();
+  if(!s) return '';
+  if(s.includes('대면')) return '대면상담';
+  if(s.includes('전화')) return '전화상담';
+  if(s.includes('화상')) return '화상상담';
+  if(s.includes('메신저') || s.includes('온라인')) return '메신저/온라인';
+  return '기타';
+}
+
+function normalizeMultiPlace(t){
+  const s = String(t || '').trim();
+  if(!s) return '';
+  // 번호 3 및 '타 센터'를 '소속 센터'보다 먼저 검사하여 오집계 방지
+  if(s.startsWith('3.') || s.includes('타 센터') || s.includes('타센터')) return '타센터';
+  if(s.startsWith('1.') || (s.includes('센터') && !s.includes('타'))) return '소속 센터(부서) 내';
+  if(s.startsWith('2.') || s.includes('소방서')) return '소속 소방서 내';
+  if(s.startsWith('4.') || s.includes('상담시설')) return '상담시설';
+  return '기타';
+}
+
+function normalizeMultiPath(t){
+  const s = String(t || '').trim();
+  if(!s) return '';
+  if((s.includes('찾아가는') || s.includes('찾상')) && (s.includes('의무') || s.startsWith('1.'))) return '의무상담(찾아가는 상담실)';
+  if(s.includes('본인') || s.startsWith('2.')) return '본인신청';
+  if(s.includes('상급자') || s.includes('관리자') || s.startsWith('3.')) return '상급자(관리자) 추천';
+  if(s.includes('동료') || s.startsWith('4.')) return '동료 추천(권유)';
+  if(s.includes('상담사 권고') || s.startsWith('5.')) return '상담사 권고';
+  return '기타';
+}
+
+function normalizeMultiPrev(t){
+  const s = String(t || '').trim();
+  if(!s) return '';
+  if(s.includes('없음') || /^1\s*\./.test(s)) return '상담경험 없음';
+  if(s.includes('찾상') || s.includes('찾아가는 상담실만') || /^2\s*-\s*1\b/.test(s)) return '찾아가는 상담실만 경험';
+  if(s.includes('개인상담') || /^2\s*-\s*2\b/.test(s)) return '개인상담기관';
+  if(s.includes('정신건강의학과') || /^2\s*-\s*3\b/.test(s)) return '정신건강의학과';
+  if(s.includes('유관기관') || /^2\s*-\s*4\b/.test(s)) return '지역사회 내 유관기관';
+  return '기타';
+}
+
+async function renderMultiStats(){
+  const sc = $('statSubContainer');
+  if(!sc) return;
+
+  const now = new Date(Date.now() + 9 * 3600000);
+  const today = now.toISOString().slice(0, 10);
+  const from = S._statMultiFrom || STATS_DEFAULT_START;
+  const to = S._statMultiTo || today;
+  const reg = S._statMultiRegion || '';
+  const dedup = S._statMultiDedup || 'dedup';
+  const innerTab = S._statMultiInnerTab || 'tab1';
+
+  S._statMultiFrom = from;
+  S._statMultiTo = to;
+  S._statMultiRegion = reg;
+  S._statMultiDedup = dedup;
+  S._statMultiInnerTab = innerTab;
+
+  sc.innerHTML = `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:end;">
+        <div class="field">
+          <label>지역 범위</label>
+          <select id="st_m_region" onchange="onMultiStatFilterChange()">
+            <option value="">전체 (관할 합계)</option>
+            ${regionOptionsHTML(reg, { plain:true })}
+          </select>
+        </div>
+        <div class="field">
+          <label>시작일</label>
+          <input type="date" id="st_m_from" value="${from}" onchange="onMultiStatFilterChange()">
+        </div>
+        <div class="field">
+          <label>종료일</label>
+          <input type="date" id="st_m_to" value="${to}" onchange="onMultiStatFilterChange()">
+        </div>
+        <div class="field">
+          <label>집계 모드</label>
+          <select id="st_m_dedup" onchange="onMultiStatFilterChange()">
+            <option value="dedup" ${dedup==='dedup'?'selected':''}>중복제거 실인원 (선택기간 1인 1회)</option>
+            <option value="raw" ${dedup==='raw'?'selected':''}>건수 그대로 (연인원/발생건수)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center">
+        <span class="hint" style="margin-right:4px;">빠른 기간:</span>
+        <button class="btn ghost" style="padding:4px 9px;font-size:14px;" onclick="setMultiStatQuickDate('q4')">4분기(10~12월)</button>
+        <button class="btn ghost" style="padding:4px 9px;font-size:14px;" onclick="setMultiStatQuickDate('month')">당월</button>
+        <button class="btn ghost" style="padding:4px 9px;font-size:14px;" onclick="setMultiStatQuickDate('all')">전체</button>
+        <div class="spacer"></div>
+        <button class="btn" style="padding:6px 14px;font-size:15px;" onclick="refreshMultiStats()">조회 / 새로고침</button>
+      </div>
+    </div>
+
+    <!-- 내부 탭 네비게이션 -->
+    <div style="display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn ${innerTab==='tab1'?'':'ghost'}" onclick="setMultiInnerTab('tab1')" style="border-radius:6px 6px 0 0;font-size:15px;padding:9px 15px;">
+        1. 종합 상담 실적표
+      </button>
+      <button class="btn ${innerTab==='tab2'?'':'ghost'}" onclick="setMultiInnerTab('tab2')" style="border-radius:6px 6px 0 0;font-size:15px;padding:9px 15px;">
+        2. 관서(소방서)별 현황
+      </button>
+      <button class="btn ${innerTab==='tab3'?'':'ghost'}" onclick="setMultiInnerTab('tab3')" style="border-radius:6px 6px 0 0;font-size:15px;padding:9px 15px;">
+        3. 인구사회학적 분포
+      </button>
+      <button class="btn ${innerTab==='tab4'?'':'ghost'}" onclick="setMultiInnerTab('tab4')" style="border-radius:6px 6px 0 0;font-size:15px;padding:9px 15px;">
+        4. 상담 요인 및 조치
+      </button>
+      <button class="btn ${innerTab==='tab5'?'':'ghost'}" onclick="setMultiInnerTab('tab5')" style="border-radius:6px 6px 0 0;font-size:15px;padding:9px 15px;">
+        5. 집단상담 세부
+      </button>
+      <div class="spacer"></div>
+      <button class="btn ghost" style="padding:6px 12px;font-size:14.5px;color:var(--accent-dark);font-weight:700" onclick="copyCurrentMultiTable()">
+        📋 현재 표 엑셀/한글 복사
+      </button>
+    </div>
+
+    <div id="multiStatContent"><div class="panel"><div class="empty">자료를 집계하고 있습니다…</div></div></div>
+  `;
+
+  await loadAndRenderMultiStats();
+}
+
+function setMultiStatQuickDate(type){
+  const now = new Date(Date.now() + 9 * 3600000);
+  const y = now.toISOString().slice(0, 4);
+  const m = now.toISOString().slice(5, 7);
+  const today = now.toISOString().slice(0, 10);
+  if(type === 'q4'){
+    S._statMultiFrom = y + '-10-01';
+    S._statMultiTo = y + '-12-31';
+  } else if(type === 'month'){
+    S._statMultiFrom = y + '-' + m + '-01';
+    S._statMultiTo = today;
+  } else if(type === 'all'){
+    S._statMultiFrom = STATS_DEFAULT_START;
+    S._statMultiTo = today;
+  }
+  // A. 캐시 비우기 (조회 범위 변경 시 항상 최신 페칭 보장)
+  S._multiStatsCachedRows = null;
+  renderMultiStats();
+}
+
+function onMultiStatFilterChange(){
+  S._statMultiRegion = $('st_m_region').value;
+  S._statMultiFrom = $('st_m_from').value;
+  S._statMultiTo = $('st_m_to').value;
+  S._statMultiDedup = $('st_m_dedup').value;
+  S._multiStatsCachedRows = null;
+  renderMultiStats();
+}
+
+function setMultiInnerTab(tab){
+  S._statMultiInnerTab = tab;
+  renderMultiStats();
+}
+
+function refreshMultiStats(){
+  S._multiStatsCachedRows = null;
+  renderMultiStats();
+}
+
+/* ───────────────────────────────────────────────────
+   데이터 페칭 및 집계 전처리
+   ─────────────────────────────────────────────────── */
+async function loadAndRenderMultiStats(){
+  const body = $('multiStatContent');
+  if(!body) return;
+
+  const from = S._statMultiFrom || STATS_DEFAULT_START;
+  const to = S._statMultiTo || new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const reg = S._statMultiRegion || '';
+  const dedup = S._statMultiDedup || 'dedup';
+  const innerTab = S._statMultiInnerTab || 'tab1';
+
+  let rows = S._multiStatsCachedRows;
+  if(!rows){
+    try {
+      // 1. 폼 메타데이터 조회
+      const { data: allForms, error: fErr } = await sb.from('forms').select('id, slug, title');
+      if(fErr) throw fErr;
+
+      const slugMap = {};
+      const targetFormIds = [];
+      (allForms || []).forEach(f => {
+        slugMap[f.id] = f.slug;
+        if(MULTI_TARGET_SLUGS.includes(f.slug)) targetFormIds.push(f.id);
+      });
+
+      if(!targetFormIds.length){
+        body.innerHTML = '<div class="panel"><div class="empty">대상 서식이 등록되어 있지 않습니다.</div></div>';
+        return;
+      }
+
+      // 2. 지역 범위 산출
+      let rids = null;
+      if(reg){
+        rids = regionBranch(reg);
+        if(!rids.length) rids = [reg];
+      }
+
+      // 3. 기록 페칭 (B. 늦게 입력한 기록 누락 방지: created_at 제한 없이 consult_date 기준 인메모리 필터링)
+      const selectCols = 'id,form_id,region_id,client_id,client_internal_id,client_name,birth_date,gender,group_id,created_at,' +
+        'consult_date:data->>consult_date,station:data->>station,rank:data->>rank,age_group:data->>age_group,' +
+        'job:data->>job,duty:data->>duty,stress:data->>stress,stress_factor:data->>stress_factor,' +
+        'problem_type:data->problem_type,path:data->>path,method:data->>method,place:data->>place,action:data->>action,' +
+        'disaster_action:data->>disaster_action,call_action_plan:data->>call_action_plan,' +
+        'prev_exp:data->>prev_exp,med_exp:data->>med_exp,' +
+        'sub_cat:data->>sub_cat,sub_cat_life:data->>sub_cat_life,life_test_type:data->>life_test_type,' +
+        'mdate:data->>mdate,opendays:data->>opendays,calls:data->>calls';
+
+      const buildQuery = () => {
+        let q = sb.from('form_records')
+          .select(selectCols, { count: 'exact' })
+          .in('form_id', targetFormIds)
+          .order('id');
+        if(rids && rids.length > 0){
+          q = q.in('region_id', rids);
+        }
+        return q;
+      };
+
+      const rawRecs = await svFetchAll(buildQuery);
+
+      // 4. 결측 내담자 인적사항 보완 (필요 시)
+      const missingClientIds = Array.from(new Set(
+        rawRecs.filter(r => r.client_id && (!r.gender || !r.birth_date)).map(r => r.client_id)
+      ));
+      const clientMap = {};
+      for(let i=0; i<missingClientIds.length; i+=1000){
+        const chunk = missingClientIds.slice(i, i+1000);
+        const { data: cData } = await sb.from('clients').select('id, gender, birth_date, extra').in('id', chunk);
+        (cData||[]).forEach(c => { clientMap[c.id] = c; });
+      }
+
+      // 5. 전처리 및 정규화
+      rows = rawRecs.map(r => {
+        const slug = slugMap[r.form_id] || '';
+        const userKey = r.client_id ? ('ID:' + r.client_id) :
+          (r.client_internal_id ? ('INT:' + r.client_internal_id) :
+          ('NB:' + (r.client_name || '').trim() + '_' + (r.birth_date || '').trim()));
+
+        let dStr = (r.consult_date || r.mdate || '').slice(0, 10);
+        if(!dStr && r.created_at){
+          const kst = new Date(new Date(r.created_at).getTime() + 9 * 3600000);
+          dStr = kst.toISOString().slice(0, 10);
+        }
+
+        const station = (r.station || '').trim() || (regionNameOf(r.region_id) || '소속 미기재');
+
+        let gender = (r.gender || clientMap[r.client_id]?.gender || '').trim();
+        if(gender === '남' || gender === '남자') gender = '남';
+        else if(gender === '여' || gender === '여자') gender = '여';
+        else gender = '미상';
+
+        const bDate = r.birth_date || clientMap[r.client_id]?.birth_date || '';
+        let ageBand = '미상';
+        if(bDate && dStr){
+          const b = new Date(bDate);
+          const c = new Date(dStr);
+          if(!isNaN(b) && !isNaN(c)){
+            let a = c.getFullYear() - b.getFullYear();
+            const mDiff = c.getMonth() - b.getMonth();
+            if(mDiff < 0 || (mDiff === 0 && c.getDate() < b.getDate())) a--;
+            if(a >= 0){
+              if(a < 30) ageBand = '20대 이하';
+              else if(a < 40) ageBand = '30대';
+              else if(a < 50) ageBand = '40대';
+              else if(a < 60) ageBand = '50대';
+              else ageBand = '60대 이상';
+            }
+          }
+        }
+        if(ageBand === '미상' && r.age_group){
+          const ag = String(r.age_group);
+          if(ag.includes('20')) ageBand = '20대 이하';
+          else if(ag.includes('30')) ageBand = '30대';
+          else if(ag.includes('40')) ageBand = '40대';
+          else if(ag.includes('50')) ageBand = '50대';
+          else if(ag.includes('60')) ageBand = '60대 이상';
+        }
+
+        const rawRank = r.rank || clientMap[r.client_id]?.extra?.rank || '';
+        const normRank = normalizeMultiRank(rawRank);
+        const normJob = normalizeMultiJob(r.job, r.duty);
+
+        return {
+          id: r.id,
+          slug,
+          userKey,
+          userName: (r.client_name || '').trim(),
+          dateStr: dStr,
+          monthStr: dStr ? dStr.slice(0, 7) : '미상',
+          station,
+          gender,
+          ageBand,
+          normRank,
+          normJob,
+          group_id: r.group_id,
+          stress: r.stress || r.stress_factor || '',
+          problem_type: r.problem_type,
+          path: r.path || '',
+          method: r.method || '',
+          place: r.place || '',
+          action: r.action || r.disaster_action || r.call_action_plan || '',
+          prev_exp: r.prev_exp || r.med_exp || '',
+          sub_cat: r.sub_cat || r.sub_cat_life || '',
+          life_test: !!(r.life_test_type && String(r.life_test_type).trim()),
+          opendays: Number(r.opendays) || 0,
+          calls: Number(r.calls) || 0,
+          created_at: r.created_at
+        };
+      });
+
+      // 6. 직무 결측치 스마트 보정 (personBestJob)
+      const personBestJob = {};
+      const sortedForJob = rows.slice().sort((a,b)=> (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||''));
+      sortedForJob.forEach(r => {
+        if(r.normJob && r.normJob !== '8. 기타'){
+          personBestJob[r.userKey] = r.normJob;
+        } else if(r.normJob === '8. 기타' && !personBestJob[r.userKey]){
+          personBestJob[r.userKey] = '8. 기타';
+        }
+      });
+      rows.forEach(r => {
+        r.resolvedJob = personBestJob[r.userKey] || r.normJob || '미상';
+      });
+
+      // 7. 심층상담 4회기 이상 판정 (날짜 오름차순으로 누적 4회차 시점 식별)
+      const indepthRecs = rows.filter(r => r.slug === 'indepth').sort((a,b) =>
+        (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||'')
+      );
+      const indepthCount = {};
+      indepthRecs.forEach(r => {
+        indepthCount[r.userKey] = (indepthCount[r.userKey] || 0) + 1;
+        if(indepthCount[r.userKey] === 4){
+          r.is4thIndepth = true;
+        }
+      });
+
+      S._multiStatsCachedRows = rows;
+    } catch(err){
+      body.innerHTML = `<div class="panel"><div class="msg bad">집계 중 오류가 발생했습니다: ${esc(err.message)}</div></div>`;
+      return;
+    }
+  }
+
+  // 선택한 기간 [from, to] 에 속하는 기록 필터링
+  const periodRows = rows.filter(r => r.dateStr >= from && r.dateStr <= to);
+
+  if(innerTab === 'tab1') renderMultiTab1(periodRows, from, to, dedup);
+  else if(innerTab === 'tab2') renderMultiTab2(periodRows, from, to, dedup);
+  else if(innerTab === 'tab3') renderMultiTab3(periodRows, from, to, dedup);
+  else if(innerTab === 'tab4') renderMultiTab4(periodRows, from, to, dedup);
+  else if(innerTab === 'tab5') renderMultiTab5(periodRows, from, to, dedup);
+}
+
+/* ───────────────────────────────────────────────────
+   탭 1: 종합 상담 실적표 (월별 추이 & 누적 합계)
+   ─────────────────────────────────────────────────── */
+function renderMultiTab1(rows, from, to, dedup){
+  const el = $('multiStatContent');
+  if(!el) return;
+
+  const monthSet = new Set();
+  rows.forEach(r => { if(/^\d{4}-\d{2}$/.test(r.monthStr)) monthSet.add(r.monthStr); });
+  if(monthSet.size === 0){
+    monthSet.add(from.slice(0, 7));
+    monthSet.add(to.slice(0, 7));
+  }
+  const months = Array.from(monthSet).sort();
+
+  const initBucket = () => ({
+    screen: { ppl: new Set(), cnt: 0 },
+    indepth: { ppl: new Set(), cnt: 0 },
+    over4: { ppl: new Set() },
+    life: { ppl: new Set(), cnt: 0 },
+    lifeTest: { ppl: new Set(), cnt: 0 },
+    disaster: { ppl: new Set(), cnt: 0 },
+    emergency: { ppl: new Set(), cnt: 0 },
+    personalTotal: { ppl: new Set(), cnt: 0 },
+    callOps: { days: 0, cnt: 0 },
+    callRec: { cnt: 0 },
+    group: { sessions: new Set(), pplRaw: 0, pplDedup: new Set() }
+  });
+
+  const bMap = { total: initBucket() };
+  months.forEach(m => { bMap[m] = initBucket(); });
+
+  rows.forEach(r => {
+    const m = r.monthStr;
+    const b = bMap[m];
+    const tot = bMap.total;
+
+    if(r.slug === 'screening'){
+      tot.screen.cnt++; if(b) b.screen.cnt++;
+      tot.screen.ppl.add(r.userKey); if(b) b.screen.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'indepth'){
+      tot.indepth.cnt++; if(b) b.indepth.cnt++;
+      tot.indepth.ppl.add(r.userKey); if(b) b.indepth.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+      if(r.is4thIndepth){
+        tot.over4.ppl.add(r.userKey); if(b) b.over4.ppl.add(r.userKey);
+      }
+    } else if(r.slug === 'lifecycle'){
+      tot.life.cnt++; if(b) b.life.cnt++;
+      tot.life.ppl.add(r.userKey); if(b) b.life.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+      if(r.life_test){
+        tot.lifeTest.cnt++; if(b) b.lifeTest.cnt++;
+        tot.lifeTest.ppl.add(r.userKey); if(b) b.lifeTest.ppl.add(r.userKey);
+      }
+    } else if(r.slug === 'disaster'){
+      tot.disaster.cnt++; if(b) b.disaster.cnt++;
+      tot.disaster.ppl.add(r.userKey); if(b) b.disaster.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'emergency'){
+      tot.emergency.cnt++; if(b) b.emergency.cnt++;
+      tot.emergency.ppl.add(r.userKey); if(b) b.emergency.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'ops-callcenter'){
+      tot.callOps.days += r.opendays; if(b) b.callOps.days += r.opendays;
+      tot.callOps.cnt += r.calls; if(b) b.callOps.cnt += r.calls;
+    } else if(r.slug === 'call'){
+      tot.callRec.cnt++; if(b) b.callRec.cnt++;
+    } else if(r.slug === 'group'){
+      const sid = r.group_id || r.id;
+      tot.group.sessions.add(sid); if(b) b.group.sessions.add(sid);
+      tot.group.pplRaw++; if(b) b.group.pplRaw++;
+      tot.group.pplDedup.add(r.userKey); if(b) b.group.pplDedup.add(r.userKey);
+    }
+  });
+
+  const getPpl = (pSet, rawCnt) => (dedup === 'dedup' ? pSet.size : rawCnt);
+
+  let thead = `<tr>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;">상담 구분</th>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;">단위</th>
+    <th colspan="${months.length}" style="text-align:center;">월별 실적</th>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;background:var(--accent-soft);color:var(--accent-dark);">누적 합계</th>
+  </tr><tr>`;
+  months.forEach(m => { thead += `<th style="text-align:center;">${m.slice(5)}월</th>`; });
+  thead += `</tr>`;
+
+  const makeRow = (label, unit, extractFn, isHighlight=false) => {
+    let r = `<tr ${isHighlight?'class="total" style="background:var(--accent-soft);font-weight:700"':''}>
+      <td style="font-weight:${isHighlight?'700':'500'}">${esc(label)}</td>
+      <td class="num" style="text-align:center">${esc(unit)}</td>`;
+    months.forEach(m => {
+      const v = extractFn(bMap[m]);
+      r += `<td class="num" style="text-align:right">${v.toLocaleString()}</td>`;
+    });
+    const totV = extractFn(bMap.total);
+    r += `<td class="num hi" style="text-align:right;font-weight:700">${totV.toLocaleString()}</td></tr>`;
+    return r;
+  };
+
+  let tbody = '';
+  // 스크리닝(a)
+  tbody += makeRow('스크리닝 (a) - 인원', '명', b => getPpl(b.screen.ppl, b.screen.cnt));
+  tbody += makeRow('스크리닝 (a) - 건수', '건', b => b.screen.cnt);
+  // 심층상담(b)
+  tbody += makeRow('심층상담 (b) - 인원', '명', b => getPpl(b.indepth.ppl, b.indepth.cnt));
+  tbody += makeRow('심층상담 (b) - 건수', '건', b => b.indepth.cnt);
+  // 4회기 이상 심층상담(★)
+  tbody += makeRow('★ 4회기 이상 심층상담 (도달 인원)', '명', b => b.over4.ppl.size, true);
+  // 생애주기별 상담(c)
+  tbody += makeRow('생애주기별 상담 (c) - 인원', '명', b => getPpl(b.life.ppl, b.life.cnt));
+  tbody += makeRow('생애주기별 상담 (c) - 건수', '건', b => b.life.cnt);
+  tbody += makeRow('　└ 심리검사 실시 - 인원', '명', b => getPpl(b.lifeTest.ppl, b.lifeTest.cnt));
+  tbody += makeRow('　└ 심리검사 실시 - 건수', '건', b => b.lifeTest.cnt);
+  // 대형재난(d)
+  tbody += makeRow('대형재난 출동대원 심리상담 (d) - 인원', '명', b => getPpl(b.disaster.ppl, b.disaster.cnt));
+  tbody += makeRow('대형재난 출동대원 심리상담 (d) - 건수', '건', b => b.disaster.cnt);
+  // 긴급심리지원(e)
+  tbody += makeRow('긴급심리지원 (e) - 인원', '명', b => getPpl(b.emergency.ppl, b.emergency.cnt));
+  tbody += makeRow('긴급심리지원 (e) - 건수', '건', b => b.emergency.cnt);
+  // 개인상담 합계
+  tbody += makeRow('개인상담 합계 (a~e) - 실인원', '명', b => getPpl(b.personalTotal.ppl, b.personalTotal.cnt), true);
+  tbody += makeRow('개인상담 합계 (a~e) - 상담건수', '건', b => b.personalTotal.cnt, true);
+  // 긴급콜(f) - 운영일지와 개별기록 완벽 분리 표기 (월별 합 = 누적 합계 100% 일치)
+  tbody += makeRow('긴급콜 (콜센터) - 운영일수', '일', b => b.callOps.days);
+  tbody += makeRow('긴급콜 (콜센터) - 수신건수(운영기록)', '건', b => b.callOps.cnt);
+  tbody += makeRow('긴급콜 (개별상담) - 상담건수', '건', b => b.callRec.cnt);
+  // 집단상담
+  tbody += makeRow('집단상담 - 실시 횟수', '회', b => b.group.sessions.size);
+  tbody += makeRow('집단상담 - 참여 연인원', '명', b => b.group.pplRaw);
+  tbody += makeRow('집단상담 - 중복제거 실인원', '명', b => b.group.pplDedup.size);
+
+  el.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>종합 상담 실적표</h2>
+        <button class="btn ghost" style="font-size:14px;padding:6px 12px;" onclick="copyMultiTableTSV('tab1Table')">
+          📋 표 복사 (한글/엑셀 호환)
+        </button>
+      </div>
+      <div class="desc" style="margin-bottom:14px;">
+        소방청 분기 보고서 서식 III-1에 대응하는 월별 상담실적 종합표입니다. (현재 모드: <b>${dedup==='dedup'?'중복제거 실인원':'건수 그대로'}</b>)
+      </div>
+      <div class="scroll-x">
+        <table class="list-table lu" id="tab1Table">
+          <thead>${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   탭 2: 관서(소방서)별 현황표
+   ─────────────────────────────────────────────────── */
+function renderMultiTab2(rows, from, to, dedup){
+  const el = $('multiStatContent');
+  if(!el) return;
+
+  const stMap = {};
+  const initSt = () => ({
+    personalTotal: { ppl: new Set(), cnt: 0 },
+    screen: { ppl: new Set(), cnt: 0 },
+    indepth: { ppl: new Set(), cnt: 0 },
+    over4: { ppl: new Set() },
+    life: { ppl: new Set(), cnt: 0 },
+    disaster: { ppl: new Set(), cnt: 0 },
+    emergency: { ppl: new Set(), cnt: 0 },
+    call: { cnt: 0 },
+    group: { sessions: new Set(), pplRaw: 0 }
+  });
+
+  const overall = initSt();
+
+  rows.forEach(r => {
+    // 콜센터 운영일지(ops-callcenter)는 관서별 상담이 아니므로 관서 행 생성에서 제외
+    if(r.slug === 'ops-callcenter') return;
+
+    const st = r.station || '소속 미기재';
+    if(!stMap[st]) stMap[st] = initSt();
+    const b = stMap[st];
+
+    if(r.slug === 'screening'){
+      b.screen.cnt++; b.screen.ppl.add(r.userKey);
+      b.personalTotal.cnt++; b.personalTotal.ppl.add(r.userKey);
+      overall.screen.cnt++; overall.screen.ppl.add(r.userKey);
+      overall.personalTotal.cnt++; overall.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'indepth'){
+      b.indepth.cnt++; b.indepth.ppl.add(r.userKey);
+      b.personalTotal.cnt++; b.personalTotal.ppl.add(r.userKey);
+      overall.indepth.cnt++; overall.indepth.ppl.add(r.userKey);
+      overall.personalTotal.cnt++; overall.personalTotal.ppl.add(r.userKey);
+      if(r.is4thIndepth){
+        b.over4.ppl.add(r.userKey);
+        overall.over4.ppl.add(r.userKey);
+      }
+    } else if(r.slug === 'lifecycle'){
+      b.life.cnt++; b.life.ppl.add(r.userKey);
+      b.personalTotal.cnt++; b.personalTotal.ppl.add(r.userKey);
+      overall.life.cnt++; overall.life.ppl.add(r.userKey);
+      overall.personalTotal.cnt++; overall.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'disaster'){
+      b.disaster.cnt++; b.disaster.ppl.add(r.userKey);
+      b.personalTotal.cnt++; b.personalTotal.ppl.add(r.userKey);
+      overall.disaster.cnt++; overall.disaster.ppl.add(r.userKey);
+      overall.personalTotal.cnt++; overall.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'emergency'){
+      b.emergency.cnt++; b.emergency.ppl.add(r.userKey);
+      b.personalTotal.cnt++; b.personalTotal.ppl.add(r.userKey);
+      overall.emergency.cnt++; overall.emergency.ppl.add(r.userKey);
+      overall.personalTotal.cnt++; overall.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'call'){
+      b.call.cnt++; overall.call.cnt++;
+    } else if(r.slug === 'group'){
+      const sid = r.group_id || r.id;
+      b.group.sessions.add(sid); b.group.pplRaw++;
+      overall.group.sessions.add(sid); overall.group.pplRaw++;
+    }
+  });
+
+  const getP = (pSet, c) => (dedup === 'dedup' ? pSet.size : c);
+  const stations = Object.keys(stMap).sort((a,b) => a.localeCompare(b, 'ko'));
+
+  let thead = `<tr>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;">소방서 (관서)</th>
+    <th colspan="2" style="text-align:center;background:var(--accent-soft);">개인상담 합계</th>
+    <th colspan="2" style="text-align:center;">스크리닝</th>
+    <th colspan="2" style="text-align:center;">심층상담</th>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;color:var(--accent-dark);">4회기이상<br>(인원)</th>
+    <th colspan="2" style="text-align:center;">생애주기</th>
+    <th colspan="2" style="text-align:center;">대형재난</th>
+    <th colspan="2" style="text-align:center;">긴급심리</th>
+    <th rowspan="2" style="vertical-align:middle;text-align:center;">긴급콜<br>(건수)</th>
+    <th colspan="2" style="text-align:center;">집단상담</th>
+  </tr><tr>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">인원</th><th style="text-align:right">건수</th>
+    <th style="text-align:right">횟수</th><th style="text-align:right">연인원</th>
+  </tr>`;
+
+  let sumRow = { pPpl:0, pCnt:0, sPpl:0, sCnt:0, iPpl:0, iCnt:0, o4Ppl:0, lPpl:0, lCnt:0, dPpl:0, dCnt:0, ePpl:0, eCnt:0, cCnt:0, gSess:0, gPpl:0 };
+
+  let tbody = '';
+  stations.forEach(st => {
+    const b = stMap[st];
+    const pp = getP(b.personalTotal.ppl, b.personalTotal.cnt);
+    const sp = getP(b.screen.ppl, b.screen.cnt);
+    const ip = getP(b.indepth.ppl, b.indepth.cnt);
+    const o4 = b.over4.ppl.size;
+    const lp = getP(b.life.ppl, b.life.cnt);
+    const dp = getP(b.disaster.ppl, b.disaster.cnt);
+    const ep = getP(b.emergency.ppl, b.emergency.cnt);
+
+    sumRow.pPpl += pp; sumRow.pCnt += b.personalTotal.cnt;
+    sumRow.sPpl += sp; sumRow.sCnt += b.screen.cnt;
+    sumRow.iPpl += ip; sumRow.iCnt += b.indepth.cnt;
+    sumRow.o4Ppl += o4;
+    sumRow.lPpl += lp; sumRow.lCnt += b.life.cnt;
+    sumRow.dPpl += dp; sumRow.dCnt += b.disaster.cnt;
+    sumRow.ePpl += ep; sumRow.eCnt += b.emergency.cnt;
+    sumRow.cCnt += b.call.cnt;
+    sumRow.gSess += b.group.sessions.size; sumRow.gPpl += b.group.pplRaw;
+
+    tbody += `<tr>
+      <td style="font-weight:600">${esc(st)}</td>
+      <td class="num" style="text-align:right;font-weight:700">${pp.toLocaleString()}</td>
+      <td class="num" style="text-align:right;font-weight:700">${b.personalTotal.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${sp.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.screen.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${ip.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.indepth.cnt.toLocaleString()}</td>
+      <td class="num hi" style="text-align:right;font-weight:700">${o4.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${lp.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.life.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${dp.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.disaster.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${ep.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.emergency.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.call.cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.group.sessions.size.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${b.group.pplRaw.toLocaleString()}</td>
+    </tr>`;
+  });
+
+  // 소계 (단순합산)
+  tbody += `<tr class="total" style="background:#edf4ee;font-weight:700;">
+    <td>관서별 단순 소계</td>
+    <td class="num" style="text-align:right">${sumRow.pPpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.pCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.sPpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.sCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.iPpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.iCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.o4Ppl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.lPpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.lCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.dPpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.dCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.ePpl.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.eCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.cCnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.gSess.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${sumRow.gPpl.toLocaleString()}</td>
+  </tr>`;
+
+  // 전체 (진짜 중복제거 실인원)
+  tbody += `<tr class="total" style="background:var(--accent-soft);font-weight:700;color:var(--accent-dark);">
+    <td>전체 통합 실인원 (중복제거)</td>
+    <td class="num" style="text-align:right">${overall.personalTotal.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.personalTotal.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.screen.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.screen.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.indepth.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.indepth.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.over4.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.life.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.life.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.disaster.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.disaster.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.emergency.ppl.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.emergency.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.call.cnt.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.group.sessions.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overall.group.pplRaw.toLocaleString()}</td>
+  </tr>`;
+
+  el.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>관서(소방서)별 현황표</h2>
+        <button class="btn ghost" style="font-size:14px;padding:6px 12px;" onclick="copyMultiTableTSV('tab2Table')">
+          📋 표 복사 (한글/엑셀 호환)
+        </button>
+      </div>
+      <div class="desc" style="margin-bottom:14px;">
+        관서(소방서)별 실적 분포입니다. 관서 간 이동이 있는 대원으로 인해 단순 소계와 전체 통합 실인원에 차이가 있을 수 있습니다.
+      </div>
+      <div class="scroll-x">
+        <table class="list-table lu" id="tab2Table">
+          <thead>${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   탭 3: 인구사회학적 분포
+   ─────────────────────────────────────────────────── */
+function renderMultiTab3(rows, from, to, dedup){
+  const el = $('multiStatContent');
+  if(!el) return;
+
+  const personalSlugs = ['screening', 'indepth', 'lifecycle', 'disaster', 'emergency'];
+  const pRows = rows.filter(r => personalSlugs.includes(r.slug));
+
+  const seenUser = new Set();
+  const genderMap = {};
+  const ageMap = {};
+  const rankMap = {};
+  const jobMap = {};
+
+  let totalCount = 0;
+
+  pRows.forEach(r => {
+    if(dedup === 'dedup'){
+      if(seenUser.has(r.userKey)) return;
+      seenUser.add(r.userKey);
+    }
+    totalCount++;
+
+    const g = r.gender || '미상';
+    genderMap[g] = (genderMap[g] || 0) + 1;
+
+    const a = r.ageBand || '미상';
+    ageMap[a] = (ageMap[a] || 0) + 1;
+
+    const rk = r.normRank || '미상';
+    rankMap[rk] = (rankMap[rk] || 0) + 1;
+
+    const jb = r.resolvedJob || '미상';
+    jobMap[jb] = (jobMap[jb] || 0) + 1;
+  });
+
+  const renderSubTable = (title, items, order) => {
+    let tbody = '';
+    const keys = order ? order : Object.keys(items).sort();
+    let sum = 0;
+    keys.forEach(k => {
+      const cnt = items[k] || 0;
+      sum += cnt;
+      const pct = totalCount ? ((cnt / totalCount) * 100).toFixed(1) : '0.0';
+      tbody += `<tr>
+        <td style="font-weight:600">${esc(k)}</td>
+        <td class="num" style="text-align:right">${cnt.toLocaleString()}</td>
+        <td class="num" style="text-align:right">${pct}%</td>
+      </tr>`;
+    });
+    tbody += `<tr class="total" style="background:var(--accent-soft);font-weight:700">
+      <td>합계</td>
+      <td class="num" style="text-align:right">${sum.toLocaleString()}</td>
+      <td class="num" style="text-align:right">100.0%</td>
+    </tr>`;
+
+    return `
+      <div style="flex:1;min-width:280px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px;">
+        <h3 style="margin:0 0 10px;font-size:16.5px;color:var(--accent-dark);">${esc(title)}</h3>
+        <table class="list-table lu">
+          <thead><tr><th>구분</th><th style="text-align:right">인원 (${dedup==='dedup'?'명':'건'})</th><th style="text-align:right">비율</th></tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    `;
+  };
+
+  const genderOrder = ['남', '여', '미상'];
+  const ageOrder = ['20대 이하', '30대', '40대', '50대', '60대 이상', '미상'];
+  const rankOrder = ['소방사', '소방교', '소방장', '소방위', '소방경', '소방령 이상', '기타', '미상'];
+  const jobOrder = [
+    '1. 화재진압', '2. 화재운전', '3. 구조(운전포함)', '4. 구급(운전포함)',
+    '5. 상황실', '6. 화재조사', '7. 행정업무', '8. 기타', '미상'
+  ];
+
+  el.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>인구사회학적 분포 (5대 상담 대상자)</h2>
+        <button class="btn ghost" style="font-size:14px;padding:6px 12px;" onclick="copyMultiTableTSV('tab3Container')">
+          📋 전체 복사
+        </button>
+      </div>
+      <div class="desc" style="margin-bottom:16px;">
+        5대 개인상담에 참여한 소방공무원의 인구사회학적 분포입니다. (총 ${totalCount.toLocaleString()}${dedup==='dedup'?'명':'건'})
+      </div>
+      <div id="tab3Container" style="display:flex;flex-wrap:wrap;gap:16px;">
+        ${renderSubTable('1. 성별 분포', genderMap, genderOrder)}
+        ${renderSubTable('2. 연령대 분포', ageMap, ageOrder)}
+        ${renderSubTable('3. 계급별 분포', rankMap, rankOrder)}
+        ${renderSubTable('4. 직무별 분포 (8대 표준분류)', jobMap, jobOrder)}
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   탭 4: 상담 요인 및 조치 분석
+   ─────────────────────────────────────────────────── */
+function renderMultiTab4(rows, from, to, dedup){
+  const el = $('multiStatContent');
+  if(!el) return;
+
+  const personalSlugs = ['screening', 'indepth', 'lifecycle', 'disaster', 'emergency'];
+  const pRows = rows.filter(r => personalSlugs.includes(r.slug));
+
+  // 1. 주요 스트레스원 집계 (28개 표준 분류, 번호 정규화 매칭)
+  const stressCounts = {};
+  STRESS_DEFS.forEach(d => { stressCounts[d.code] = 0; });
+  let stressNone = 0;
+  let stressOther = 0;
+  let totalStressResponses = 0;
+
+  pRows.forEach(r => {
+    const s = String(r.stress || '');
+    if(!s) return;
+    totalStressResponses++;
+    let matched = false;
+    STRESS_DEFS.forEach(d => {
+      // 번호 접두어 완전 일치 검사: 예) "1-3." 또는 "1-3 " 또는 고유 라벨
+      if(s.includes(d.code + '.') || s.includes(d.code + ' ') || s.includes(d.label)){
+        stressCounts[d.code]++;
+        matched = true;
+      }
+    });
+    if(s.includes('없음')) { stressNone++; matched = true; }
+    if(!matched || s.includes('기타')) stressOther++;
+  });
+
+  // 2. 정신건강 문제유형 (screening 대상, 접두어 번호 완전일치 비교)
+  const screenRows = rows.filter(r => r.slug === 'screening');
+  const probCounts = {};
+  PROB_DEFS.forEach(d => { probCounts[d.code] = 0; });
+  let totalProbResponses = 0;
+
+  screenRows.forEach(r => {
+    const pt = r.problem_type;
+    if(!pt) return;
+    totalProbResponses++;
+    const arr = Array.isArray(pt) ? pt : [pt];
+    arr.forEach(val => {
+      const v = String(val || '').trim();
+      const mCode = v.match(/^(\d+)\./);
+      const codeNum = mCode ? mCode[1] : '';
+      PROB_DEFS.forEach(d => {
+        if(codeNum === d.code || (d.label && v.includes(d.label))){
+          probCounts[d.code]++;
+        }
+      });
+    });
+  });
+
+  // 3. 상담방식, 장소, 경로, 기존경험, 조치사항
+  const methodMap = {};
+  const placeMap = {};
+  const pathMap = {};
+  const prevMap = {};
+  const actionMap = {};
+
+  pRows.forEach(r => {
+    const m = normalizeMultiMethod(r.method);
+    if(m) methodMap[m] = (methodMap[m] || 0) + 1;
+
+    const pl = normalizeMultiPlace(r.place);
+    if(pl) placeMap[pl] = (placeMap[pl] || 0) + 1;
+
+    const pa = normalizeMultiPath(r.path);
+    if(pa) pathMap[pa] = (pathMap[pa] || 0) + 1;
+
+    const pr = normalizeMultiPrev(r.prev_exp);
+    if(pr) prevMap[pr] = (prevMap[pr] || 0) + 1;
+
+    const ac = normalizeMultiAction(r.action);
+    if(ac) actionMap[ac] = (actionMap[ac] || 0) + 1;
+  });
+
+  // 응답한 건수 합계를 분모로 사용하여 비율 합산 100.0% 보장
+  const renderSimpleTable = (title, map) => {
+    let tbody = '';
+    const entries = Object.entries(map).sort((a,b)=>b[1]-a[1]);
+    const sum = entries.reduce((acc, cur) => acc + cur[1], 0);
+    entries.forEach(([k, v]) => {
+      const pct = sum ? ((v / sum) * 100).toFixed(1) : '0.0';
+      tbody += `<tr>
+        <td style="font-weight:600">${esc(k)}</td>
+        <td class="num" style="text-align:right">${v.toLocaleString()}</td>
+        <td class="num" style="text-align:right">${pct}%</td>
+      </tr>`;
+    });
+    tbody += `<tr class="total" style="background:var(--accent-soft);font-weight:700">
+      <td>응답 합계</td>
+      <td class="num" style="text-align:right">${sum.toLocaleString()}</td>
+      <td class="num" style="text-align:right">100.0%</td>
+    </tr>`;
+
+    return `
+      <div style="flex:1;min-width:260px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px;">
+        <h3 style="margin:0 0 10px;font-size:16px;color:var(--accent-dark);">${esc(title)}</h3>
+        <table class="list-table lu">
+          <thead><tr><th>구분</th><th style="text-align:right">응답수</th><th style="text-align:right">비율</th></tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    `;
+  };
+
+  // 스트레스원 표 본문
+  let stressTbody = '';
+  STRESS_DEFS.forEach(d => {
+    const cnt = stressCounts[d.code] || 0;
+    const pct = totalStressResponses ? ((cnt / totalStressResponses) * 100).toFixed(1) : '0.0';
+    stressTbody += `<tr>
+      <td style="text-align:center;font-weight:600;color:var(--sub)">${d.code}</td>
+      <td style="font-weight:600">${esc(d.label)}</td>
+      <td class="num" style="text-align:right">${cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${pct}%</td>
+    </tr>`;
+  });
+  stressTbody += `<tr><td style="text-align:center;color:var(--sub)">-</td><td>없음</td><td class="num" style="text-align:right">${stressNone}</td><td class="num" style="text-align:right">${totalStressResponses?((stressNone/totalStressResponses)*100).toFixed(1):'0.0'}%</td></tr>`;
+  stressTbody += `<tr><td style="text-align:center;color:var(--sub)">-</td><td>기타</td><td class="num" style="text-align:right">${stressOther}</td><td class="num" style="text-align:right">${totalStressResponses?((stressOther/totalStressResponses)*100).toFixed(1):'0.0'}%</td></tr>`;
+
+  // 문제유형 표 본문
+  let probTbody = '';
+  PROB_DEFS.forEach(d => {
+    const cnt = probCounts[d.code] || 0;
+    const pct = totalProbResponses ? ((cnt / totalProbResponses) * 100).toFixed(1) : '0.0';
+    probTbody += `<tr>
+      <td style="font-weight:600">${d.code}. ${esc(d.label)}</td>
+      <td class="num" style="text-align:right">${cnt.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${pct}%</td>
+    </tr>`;
+  });
+
+  el.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>상담 요인 및 조치사항 분석</h2>
+        <button class="btn ghost" style="font-size:14px;padding:6px 12px;" onclick="copyMultiTableTSV('tab4Container')">
+          📋 전체 복사
+        </button>
+      </div>
+      <div class="desc" style="margin-bottom:16px;">
+        소방청 29개 주요 스트레스원 및 정신건강 문제유형, 상담 환경/조치 분석 결과입니다.
+      </div>
+      <div id="tab4Container">
+        <!-- 1. 스트레스원 & 문제유형 -->
+        <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+          <div style="flex:1.2;min-width:320px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px;">
+            <h3 style="margin:0 0 10px;font-size:16.5px;color:var(--accent-dark);">주요 스트레스원 (소방청 29개 표준 분류, 다중응답)</h3>
+            <div style="max-height:480px;overflow-y:auto;">
+              <table class="list-table lu">
+                <thead><tr><th style="text-align:center">코드</th><th>스트레스 요인</th><th style="text-align:right">응답 건수</th><th style="text-align:right">비율</th></tr></thead>
+                <tbody>${stressTbody}</tbody>
+              </table>
+            </div>
+          </div>
+          <div style="flex:1;min-width:300px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px;">
+            <h3 style="margin:0 0 10px;font-size:16.5px;color:var(--accent-dark);">피상담자 정신건강문제 유형 (스크리닝)</h3>
+            <table class="list-table lu">
+              <thead><tr><th>유형</th><th style="text-align:right">응답 건수</th><th style="text-align:right">비율</th></tr></thead>
+              <tbody>${probTbody}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. 방식, 장소, 경로, 조치, 기존상담경험 -->
+        <div style="display:flex;flex-wrap:wrap;gap:16px;">
+          ${renderSimpleTable('상담 방식', methodMap)}
+          ${renderSimpleTable('상담 장소', placeMap)}
+          ${renderSimpleTable('상담 경로', pathMap)}
+          ${renderSimpleTable('기존 상담경험 (스크리닝)', prevMap)}
+          ${renderSimpleTable('주요 조치사항', actionMap)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   탭 5: 집단상담 세부 현황
+   ─────────────────────────────────────────────────── */
+function renderMultiTab5(rows, from, to, dedup){
+  const el = $('multiStatContent');
+  if(!el) return;
+
+  const gRows = rows.filter(r => r.slug === 'group');
+
+  const catMap = {};
+  const overallSessions = new Set();
+  const overallPpl = new Set();
+  let overallRaw = 0;
+
+  gRows.forEach(r => {
+    const sub = (r.sub_cat || '').trim() || '일반 집단상담';
+    if(!catMap[sub]) catMap[sub] = { sessions: new Set(), raw: 0, dedup: new Set() };
+    const sid = r.group_id || r.id;
+    catMap[sub].sessions.add(sid);
+    catMap[sub].raw++;
+    catMap[sub].dedup.add(r.userKey);
+
+    overallSessions.add(sid);
+    overallRaw++;
+    overallPpl.add(r.userKey);
+  });
+
+  const cats = Object.keys(catMap).sort();
+
+  let tbody = '';
+  cats.forEach(c => {
+    const d = catMap[c];
+    tbody += `<tr>
+      <td style="font-weight:600">${esc(c)}</td>
+      <td class="num" style="text-align:right;font-weight:700">${d.sessions.size.toLocaleString()}</td>
+      <td class="num" style="text-align:right">${d.raw.toLocaleString()}</td>
+      <td class="num" style="text-align:right;font-weight:700">${d.dedup.size.toLocaleString()}</td>
+    </tr>`;
+  });
+
+  tbody += `<tr class="total" style="background:var(--accent-soft);font-weight:700;color:var(--accent-dark);">
+    <td>집단상담 전체 합계</td>
+    <td class="num" style="text-align:right">${overallSessions.size.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overallRaw.toLocaleString()}</td>
+    <td class="num" style="text-align:right">${overallPpl.size.toLocaleString()}</td>
+  </tr>`;
+
+  el.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>집단상담 프로그램별 실시 현황</h2>
+        <button class="btn ghost" style="font-size:14px;padding:6px 12px;" onclick="copyMultiTableTSV('tab5Table')">
+          📋 표 복사 (한글/엑셀 호환)
+        </button>
+      </div>
+      <div class="desc" style="margin-bottom:14px;">
+        집단상담 프로그램(소분류)별 실시 횟수(고유 그룹수), 참여 연인원 및 실인원입니다.
+      </div>
+      <div class="scroll-x">
+        <table class="list-table lu" id="tab5Table">
+          <thead>
+            <tr>
+              <th>프로그램 (소분류)</th>
+              <th style="text-align:right">실시 횟수 (회)</th>
+              <th style="text-align:right">참여 연인원 (명)</th>
+              <th style="text-align:right">중복제거 실인원 (명)</th>
+            </tr>
+          </thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   클립보드 TSV 복사 (한글/엑셀 완벽 호환)
+   ─────────────────────────────────────────────────── */
+function copyCurrentMultiTable(){
+  const tab = S._statMultiInnerTab || 'tab1';
+  let tid = 'tab1Table';
+  if(tab === 'tab2') tid = 'tab2Table';
+  else if(tab === 'tab3') tid = 'tab3Container';
+  else if(tab === 'tab4') tid = 'tab4Container';
+  else if(tab === 'tab5') tid = 'tab5Table';
+  copyMultiTableTSV(tid);
+}
+
+function copyMultiTableTSV(elemId){
+  const el = document.getElementById(elemId);
+  if(!el){ toast('복사할 표를 찾을 수 없습니다.'); return; }
+
+  const tables = el.tagName === 'TABLE' ? [el] : Array.from(el.querySelectorAll('table'));
+  if(!tables.length){ toast('복사할 표 데이터가 없습니다.'); return; }
+
+  const fullText = tables.map(tbl => {
+    const rows = Array.from(tbl.querySelectorAll('tr'));
+    return rows.map(r => {
+      const cells = Array.from(r.querySelectorAll('th, td'));
+      return cells.map(c => (c.innerText || c.textContent || '').trim().replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t');
+    }).join('\n');
+  }).join('\n\n');
+
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(fullText).then(() => {
+      toast('📋 표 내용이 클립보드에 복사되었습니다. (한글/엑셀 표에 바로 붙여넣기 가능)');
+    }).catch(() => fallbackCopyMultiTSV(fullText));
+  } else {
+    fallbackCopyMultiTSV(fullText);
+  }
+}
+
+function fallbackCopyMultiTSV(text){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+  toast('📋 표 내용이 복사되었습니다.');
+}
+
+/* ───────────────────────────────────────────────────
+   2) 서식별 단일 통계 (renderSingleFormStats)
+   (기존 renderStats 기능 100% 보존)
+   ─────────────────────────────────────────────────── */
+async function renderSingleFormStats(){
+  const c = $('statSubContainer');
+  if(!c) return;
+
   const fid = S._statForm && S.forms.find(f=>f.id===S._statForm) ? S._statForm : S.forms[0]?.id;
   S._statForm = fid;
   if(!fid){ c.innerHTML='<div class="panel"><div class="empty">폼이 없습니다.</div></div>'; return; }
@@ -7381,8 +8650,8 @@ async function renderStats(){
   const reg = S._statRegion || '';
 
   c.innerHTML = `<div class="panel">
-    <h2>통계</h2>
-    <div class="desc">항목 유형에 맞춰 자동으로 집계합니다. 항목을 추가하면 통계도 따라 늘어납니다.</div>
+    <h2>서식별 단일 통계</h2>
+    <div class="desc">개별 서식의 항목 유형에 맞춰 자동으로 집계합니다.</div>
     <div class="grid">
       <div class="field"><label>폼</label><select id="st_form" onchange="applyStat()">
         ${S.forms.map(f=>`<option value="${f.id}" ${f.id===fid?'selected':''}>${esc(f.title)}</option>`).join('')}
@@ -7461,6 +8730,7 @@ async function renderStats(){
   }
   $('statBody').innerHTML = html;
 }
+
 function statPanel(title, body, n, note){
   return `<div class="panel"><h2>${esc(title)}
     ${n!==undefined?`<span class="hint" style="font-weight:400"> · 응답 ${n}건</span>`:''}</h2>
