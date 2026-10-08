@@ -777,7 +777,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-10-01 다각통계';
+const APP_VERSION = '2026-10-08 통계권한확장';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -1007,7 +1007,7 @@ function hideDesktopWarn(){
      #publictest              → 빈 값 (대원이 직접 고름)
      #publictest/<지역 id>    → 그 지역으로 고정
    상위지역마다 다른 주소·큐알을 나눠 주면, 대원은 고를 것이 하나 줄고
-   중간관리자는 다른 상위지역의 이름을 보지 않게 됩니다. */
+   관리자는 다른 상위지역의 이름을 보지 않게 됩니다. */
 function hashRegion(prefix){
   const raw = location.hash.slice(1);
   if(!raw.startsWith(prefix)) return '';
@@ -1106,7 +1106,7 @@ async function enterApp(){
 
   await loadLookups();
 
-  const roleLabel = { super_admin:'최종관리자', manager:'중간관리자', counselor:'상담사' }[me.role] || me.role;
+  const roleLabel = { super_admin:'최종관리자', manager:'관리자', counselor:'상담사' }[me.role] || me.role;
   $('whoami').textContent = `${me.name} · ${roleLabel}`;
 
   $('verTag').textContent = APP_VERSION;
@@ -1279,7 +1279,7 @@ function regionBranch(id){
 }
 /* 내가 다룰 수 있는 «상위지역» 목록 (경남소방·창원소방·중부본부처럼 parent가 없는 지역).
    화면 곳곳에서 이미 «상위지역»이라 부르고 있어 그 말로 통일합니다.
-   최종관리자는 전부, 중간관리자는 자기가 맡은 것만. 중간관리자가 두세 상위지역을
+   최종관리자는 전부, 관리자는 자기가 맡은 것만. 관리자가 두세 상위지역을
    맡는 경우가 있어 하나로 못 박지 않고 목록으로 둡니다. */
 function topRegionsForMe(){
   const pool = isSuper() ? (S.allRegions||[]) : (S.regions||[]);
@@ -1306,7 +1306,7 @@ function regionPickerHTML(cur, onchangeFn){
 
 /* 설문과 간이검사의 응답은 «상위지역» 단위로 저장됩니다 — 대원이 소속을 고를 때
    상위지역만 보여 주기 때문입니다. 그래서 상위지역이 배정되지 않은 계정
-   (예: 진주소방서 하나만 맡은 중간관리자)은 주소를 만들 수도, 응답을 읽을 수도
+   (예: 진주소방서 하나만 맡은 관리자)은 주소를 만들 수도, 응답을 읽을 수도
    없습니다. 조용히 빈 화면을 보여 주면 «왜 안 되지?»로 시간을 버리므로 알려 줍니다. */
 function noTopRegionNote(){
   return `<div class="msg bad">이 계정에는 <b>상위지역이 배정되어 있지 않습니다.</b>
@@ -1357,7 +1357,7 @@ function renderTabs(){
   // 게시판은 상담사도 씁니다 (읽고 답글 달기). 그래서 폼 옆에 둡니다.
   t.insertAdjacentHTML('beforeend',
     `<button data-tab="board" onclick="openTab('board')">게시판</button>`);
-  // 운영 기록(회의·상담사 교육·홍보·콜센터)은 중간관리자가 적습니다.
+  // 운영 기록(회의·상담사 교육·홍보·콜센터)은 관리자가 적습니다.
   // 성과지표의 210점이 여기서 나오므로 상단에 자리를 줍니다.
   if(canManage() && opsForms().length){
     t.insertAdjacentHTML('beforeend',
@@ -1365,9 +1365,14 @@ function renderTabs(){
   }
   if(canManage()){
     t.insertAdjacentHTML('beforeend',
-      `<button data-tab="list" onclick="openTab('list')">기록 목록</button>
-       <button data-tab="stats" onclick="openTab('stats')">통계</button>
-       <button data-tab="admin:forms" onclick="openTab('admin:forms')"
+      `<button data-tab="list" onclick="openTab('list')">기록 목록</button>`);
+  }
+  // 통계: 상담사, 관리자, 최종관리자 모두 열람
+  t.insertAdjacentHTML('beforeend',
+    `<button data-tab="stats" onclick="openTab('stats')">통계</button>`);
+  if(canManage()){
+    t.insertAdjacentHTML('beforeend',
+      `<button data-tab="admin:forms" onclick="openTab('admin:forms')"
         style="margin-left:auto;color:var(--accent)">관리</button>`);
   }
 }
@@ -3050,7 +3055,7 @@ const FIELD_TYPES = [
 const typeLabel = t => (FIELD_TYPES.find(x=>x[0]===t)||[t,t])[1];
 
 function renderAdmin(sub){
-  // 중간관리자는 자기 지역 운영에 필요한 것만 봅니다.
+  // 관리자는 자기 지역 운영에 필요한 것만 봅니다.
   // 지역·사용자·폼은 전 지역에 영향을 주므로 최종관리자만 다룹니다.
   /* 화면이 열세 개가 되면서 한 줄로 늘어놓으면 무엇이 어디 있는지 찾기 어렵습니다.
      성격이 같은 것끼리 세 묶음으로 나누었습니다. */
@@ -3906,7 +3911,7 @@ async function adminSettings(){
   const on = data ? !!data.value : true;   // 행이 없으면 기본값(보이게)
   const html = `<div class="panel">
     <h2>설정</h2>
-    <div class="desc">시모니 전체에 적용되는 값입니다. 중간관리자·최종관리자 모두 바꿀 수 있습니다.</div>
+    <div class="desc">시모니 전체에 적용되는 값입니다. 관리자·최종관리자 모두 바꿀 수 있습니다.</div>
     <div class="section-title">지역 이동 시 이전 상담 기록 접근</div>
     <p style="margin:0 0 14px">내담자가 인사이동으로 다른 지역에 옮겨진 뒤에도, 지금 그 내담자를
       담당하는 지역의 상담사가 예전 지역에서 쓴 상담 기록까지 이어서 볼 수 있게 할지 정합니다.
@@ -4875,7 +4880,7 @@ async function adminAudit(){
   for(const [day, items] of Object.entries(byDay)){
     html += `<div class="audit-day">${esc(day)} · ${items.length}건</div><div class="tl">`;
     items.forEach(l=>{
-      const roleLab = { super_admin:'최종관리자', manager:'중간관리자',
+      const roleLab = { super_admin:'최종관리자', manager:'관리자',
                         counselor:'상담사', system:'시스템' }[l.actor_role] || l.actor_role;
       const t = new Date(l.created_at);
       const hhmm = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
@@ -5361,9 +5366,9 @@ async function adminUsers(){
     S._logins = (await res.json()).emails || {};
   }catch(e){ /* 못 받아도 목록 자체는 보여 줍니다 */ }
   const rname={}; regions.forEach(r=>rname[r.id]=r.name);
-  const roleLabel={ super_admin:'최종관리자', manager:'중간관리자', counselor:'상담사' };
+  const roleLabel={ super_admin:'최종관리자', manager:'관리자', counselor:'상담사' };
 
-  // 중간관리자는 자기 지역 상담사만 다룹니다
+  // 관리자는 자기 지역 상담사만 다룹니다
   const mine = new Set();
   if(!isSuper()){
     S.regions.forEach(r=>mine.add(r.id));
@@ -5437,9 +5442,9 @@ function editUser(id){
   const mineIds = new Set(S.regions.map(r=>r.id));
   const picked = new Set(S._amaps.filter(m=>m.user_id===id).map(m=>m.region_id));
 
-  // 중간관리자는 상담사만, 그리고 자기 지역만 고를 수 있습니다
+  // 관리자는 상담사만, 그리고 자기 지역만 고를 수 있습니다
   const roles = isSuper()
-    ? [['counselor','상담사'],['manager','중간관리자'],['super_admin','최종관리자']]
+    ? [['counselor','상담사'],['manager','관리자'],['super_admin','최종관리자']]
     : [['counselor','상담사']];
 
   const tops = S._aregions.filter(r=>!r.parent_id);
@@ -5475,7 +5480,7 @@ function editUser(id){
         <select id="m_urole" onchange="document.getElementById('regPick').style.display=this.value==='super_admin'?'none':''">
           ${roles.map(([v,l])=>`<option value="${v}" ${u?.role===v?'selected':''}>${l}</option>`).join('')}
         </select>
-        ${isSuper()?'':'<div class="hint">중간관리자는 상담사 계정만 만들 수 있습니다.</div>'}</div>
+        ${isSuper()?'':'<div class="hint">관리자는 상담사 계정만 만들 수 있습니다.</div>'}</div>
       <div class="field"><label>알림 받을 메일</label>
         <input type="email" id="m_uemail" value="${esc(u?.email||'')}"
           placeholder="실제로 받는 주소 (선택)">
@@ -5741,6 +5746,9 @@ async function renderHome(){
   });
   html += qbtn('종합심리검사 결과','해석지 열람','showCompTests()');
   html += qbtn('간이검사 결과','점수와 판정 보기','showSimpleTests()');
+  if(!canManage()){
+    html += qbtn('통계','내 실적 및 관할 통계 보기',"openTab('stats')");
+  }
   html += `</div>`;
 
   // ── 검사
@@ -7568,20 +7576,51 @@ async function renderMultiStats(){
   const dedup = S._statMultiDedup || 'dedup';
   const innerTab = S._statMultiInnerTab || 'tab1';
 
+  const isMgr = canManage();
+  const defAuthor = isMgr ? '' : (S.me?.id || '');
+  const author = S._statMultiAuthor !== undefined ? S._statMultiAuthor : defAuthor;
+
   S._statMultiFrom = from;
   S._statMultiTo = to;
   S._statMultiRegion = reg;
   S._statMultiDedup = dedup;
   S._statMultiInnerTab = innerTab;
+  S._statMultiAuthor = author;
+
+  let authorOptionsHtml = '';
+  if(!isMgr){
+    authorOptionsHtml = `
+      <option value="${S.me?.id||''}" ${author===(S.me?.id||'')?'selected':''}>내 실적만 (${esc(S.me?.name||'')})</option>
+      <option value="" ${author===''?'selected':''}>내 관할 지역 전체 (합계)</option>
+    `;
+  } else {
+    authorOptionsHtml = `
+      <option value="" ${author===''?'selected':''}>전체 상담사 (지역 합계)</option>
+      <option value="${S.me?.id||''}" ${author===(S.me?.id||'')?'selected':''}>내 실적만 (${esc(S.me?.name||'')})</option>
+    `;
+    if(S._multiStatsAuthors){
+      S._multiStatsAuthors.forEach((name, id)=>{
+        if(id !== S.me?.id && id){
+          authorOptionsHtml += `<option value="${id}" ${author===id?'selected':''}>${esc(name||'상담사')} 실적</option>`;
+        }
+      });
+    }
+  }
 
   sc.innerHTML = `
     <div class="panel" style="margin-bottom:14px;">
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:end;">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end;">
         <div class="field">
           <label>지역 범위</label>
           <select id="st_m_region" onchange="onMultiStatFilterChange()">
             <option value="">전체 (관할 합계)</option>
             ${regionOptionsHTML(reg, { plain:true })}
+          </select>
+        </div>
+        <div class="field">
+          <label>상담사 / 작성자</label>
+          <select id="st_m_author" onchange="onMultiStatFilterChange()">
+            ${authorOptionsHtml}
           </select>
         </div>
         <div class="field">
@@ -7660,11 +7699,17 @@ function setMultiStatQuickDate(type){
 }
 
 function onMultiStatFilterChange(){
-  S._statMultiRegion = $('st_m_region').value;
-  S._statMultiFrom = $('st_m_from').value;
-  S._statMultiTo = $('st_m_to').value;
+  const newReg = $('st_m_region').value;
+  const newFrom = $('st_m_from').value;
+  const newTo = $('st_m_to').value;
+  if(newReg !== S._statMultiRegion || newFrom !== S._statMultiFrom || newTo !== S._statMultiTo){
+    S._multiStatsCachedRows = null;
+  }
+  S._statMultiRegion = newReg;
+  S._statMultiFrom = newFrom;
+  S._statMultiTo = newTo;
   S._statMultiDedup = $('st_m_dedup').value;
-  S._multiStatsCachedRows = null;
+  if($('st_m_author')) S._statMultiAuthor = $('st_m_author').value;
   renderMultiStats();
 }
 
@@ -7715,10 +7760,12 @@ async function loadAndRenderMultiStats(){
       if(reg){
         rids = regionBranch(reg);
         if(!rids.length) rids = [reg];
+      } else if(!isSuper()){
+        rids = S.regions.map(r=>r.id);
       }
 
       // 3. 기록 페칭 (B. 늦게 입력한 기록 누락 방지: created_at 제한 없이 consult_date 기준 인메모리 필터링)
-      const selectCols = 'id,form_id,region_id,client_id,client_internal_id,client_name,birth_date,gender,group_id,created_at,' +
+      const selectCols = 'id,form_id,region_id,client_id,client_internal_id,client_name,birth_date,gender,group_id,created_at,author_id,author_name,' +
         'consult_date:data->>consult_date,station:data->>station,rank:data->>rank,age_group:data->>age_group,' +
         'job:data->>job,duty:data->>duty,stress:data->>stress,stress_factor:data->>stress_factor,' +
         'problem_type:data->problem_type,path:data->>path,method:data->>method,place:data->>place,action:data->>action,' +
@@ -7739,6 +7786,13 @@ async function loadAndRenderMultiStats(){
       };
 
       const rawRecs = await svFetchAll(buildQuery);
+
+      // 3-1. 작성자(상담사) 목록 수집 캐시
+      const authMap = new Map();
+      rawRecs.forEach(r => {
+        if(r.author_id && r.author_name) authMap.set(r.author_id, r.author_name);
+      });
+      S._multiStatsAuthors = authMap;
 
       // 4. 결측 내담자 인적사항 보완 (필요 시)
       const missingClientIds = Array.from(new Set(
@@ -7815,6 +7869,8 @@ async function loadAndRenderMultiStats(){
           normRank,
           normJob,
           group_id: r.group_id,
+          author_id: r.author_id,
+          author_name: r.author_name,
           stress: r.stress || r.stress_factor || '',
           problem_type: r.problem_type,
           path: r.path || '',
@@ -7864,7 +7920,13 @@ async function loadAndRenderMultiStats(){
   }
 
   // 선택한 기간 [from, to] 에 속하는 기록 필터링
-  const periodRows = rows.filter(r => r.dateStr >= from && r.dateStr <= to);
+  let periodRows = rows.filter(r => r.dateStr >= from && r.dateStr <= to);
+
+  // 작성자(상담사) 필터 적용 (4회기 도달 판정 후 인메모리 필터링)
+  const curAuthor = S._statMultiAuthor;
+  if(curAuthor){
+    periodRows = periodRows.filter(r => r.author_id === curAuthor);
+  }
 
   if(innerTab === 'tab1') renderMultiTab1(periodRows, from, to, dedup);
   else if(innerTab === 'tab2') renderMultiTab2(periodRows, from, to, dedup);
@@ -8003,8 +8065,10 @@ function renderMultiTab1(rows, from, to, dedup){
   tbody += makeRow('개인상담 합계 (a~e) - 실인원', '명', b => getPpl(b.personalTotal.ppl, b.personalTotal.cnt), true);
   tbody += makeRow('개인상담 합계 (a~e) - 상담건수', '건', b => b.personalTotal.cnt, true);
   // 긴급콜(f) - 운영일지와 개별기록 완벽 분리 표기 (월별 합 = 누적 합계 100% 일치)
-  tbody += makeRow('긴급콜 (콜센터) - 운영일수', '일', b => b.callOps.days);
-  tbody += makeRow('긴급콜 (콜센터) - 수신건수(운영기록)', '건', b => b.callOps.cnt);
+  if(canManage() || bMap.total.callOps.days > 0 || bMap.total.callOps.cnt > 0){
+    tbody += makeRow('긴급콜 (콜센터) - 운영일수', '일', b => b.callOps.days);
+    tbody += makeRow('긴급콜 (콜센터) - 수신건수(운영기록)', '건', b => b.callOps.cnt);
+  }
   tbody += makeRow('긴급콜 (개별상담) - 상담건수', '건', b => b.callRec.cnt);
   // 집단상담
   tbody += makeRow('집단상담 - 실시 횟수', '회', b => b.group.sessions.size);
@@ -8021,6 +8085,10 @@ function renderMultiTab1(rows, from, to, dedup){
       </div>
       <div class="desc" style="margin-bottom:14px;">
         소방청 분기 보고서 서식 III-1에 대응하는 월별 상담실적 종합표입니다. (현재 모드: <b>${dedup==='dedup'?'중복제거 실인원':'건수 그대로'}</b>)
+      </div>
+      <div class="desc" style="margin-top:-6px;margin-bottom:12px;font-size:12.5px;color:var(--text-muted);line-height:1.5;">
+        ※ 개인상담 합계(실인원)는 선택 기간 내 내담자 1인 1회 카운트 기준입니다.<br>
+        ※ 작성자별 실인원의 단순 합은 동일 내담자에 대한 교차 상담(담당 상담사 변경 등)이 있을 경우 지역 전체 실인원과 다를 수 있습니다.
       </div>
       <div class="scroll-x">
         <table class="list-table lu" id="tab1Table">
@@ -8641,9 +8709,10 @@ async function renderSingleFormStats(){
   const c = $('statSubContainer');
   if(!c) return;
 
-  const fid = S._statForm && S.forms.find(f=>f.id===S._statForm) ? S._statForm : S.forms[0]?.id;
+  const availableForms = canManage() ? S.forms : S.forms.filter(f=>!f.manager_only);
+  const fid = S._statForm && availableForms.find(f=>f.id===S._statForm) ? S._statForm : availableForms[0]?.id;
   S._statForm = fid;
-  if(!fid){ c.innerHTML='<div class="panel"><div class="empty">폼이 없습니다.</div></div>'; return; }
+  if(!fid){ c.innerHTML='<div class="panel"><div class="empty">조회 가능한 폼이 없습니다.</div></div>'; return; }
 
   const from = S._statFrom || '';
   const to = S._statTo || '';
@@ -8654,7 +8723,7 @@ async function renderSingleFormStats(){
     <div class="desc">개별 서식의 항목 유형에 맞춰 자동으로 집계합니다.</div>
     <div class="grid">
       <div class="field"><label>폼</label><select id="st_form" onchange="applyStat()">
-        ${S.forms.map(f=>`<option value="${f.id}" ${f.id===fid?'selected':''}>${esc(f.title)}</option>`).join('')}
+        ${availableForms.map(f=>`<option value="${f.id}" ${f.id===fid?'selected':''}>${esc(f.title)}</option>`).join('')}
       </select></div>
       <div class="field"><label>지역</label><select id="st_region" onchange="applyStat()">
         <option value="">전체</option>
@@ -8677,6 +8746,7 @@ async function renderSingleFormStats(){
 
   let q = sb.from('form_records').select('*').eq('form_id', fid).limit(5000);
   if(reg) q = q.eq('region_id', reg);
+  else if(!isSuper()) q = q.in('region_id', S.regions.map(r=>r.id));
   if(from) q = q.gte('created_at', from);
   if(to) q = q.lte('created_at', to+'T23:59:59');
   const { data: recs, error } = await q;
@@ -8691,14 +8761,16 @@ async function renderSingleFormStats(){
   const rname={}; S.regions.forEach(r=>rname[r.id]=r.name);
   let html = `<div class="cards">
     ${card('기록 수', recs.length.toLocaleString()+'건')}
-    ${card('작성자', new Set(recs.map(r=>r.author_name).filter(Boolean)).size+'명')}
+    ${canManage()?card('작성자', new Set(recs.map(r=>r.author_name).filter(Boolean)).size+'명'):''}
     ${form.links_client?card('내담자', new Set(recs.map(r=>r.client_id||r.client_name).filter(Boolean)).size+'명'):''}
   </div>`;
 
   // 공통 집계: 월별 추이 / 지역별 / 작성자별
   html += statPanel('월별 기록 수', barList(monthly(recs.map(r=>r.created_at)), null, true));
   html += statPanel('지역별', barList(tally(recs.map(r=>rname[r.region_id])), null, true));
-  html += statPanel('작성자별', barList(tally(recs.map(r=>r.author_name)), null, true));
+  if(canManage()){
+    html += statPanel('작성자별', barList(tally(recs.map(r=>r.author_name)), null, true));
+  }
 
   // 항목별 집계
   for(const f of (fields||[])){
@@ -10907,11 +10979,11 @@ async function svDelQ(id){
 }
 
 /* ── 탭 5 : 설문 링크 ──
-   간이검사도 같은 판을 씁니다. 중간관리자가 주소나 큐알을 게시판에 올리면
+   간이검사도 같은 판을 씁니다. 관리자가 주소나 큐알을 게시판에 올리면
    대원이 휴대전화로 열어 답하는 방식입니다. */
 function publicLinkPanel(hash, title, desc){
   /* 상위지역마다 주소가 다릅니다. 고르게 하지 않고 **한꺼번에 다 보여 줍니다.**
-     · 상위지역이 하나뿐인 중간관리자는 고를 것이 없으니 자기 것 하나만 뜹니다.
+     · 상위지역이 하나뿐인 관리자는 고를 것이 없으니 자기 것 하나만 뜹니다.
      · 두세 상위지역을 맡았으면 그 수만큼, 최종관리자는 전부.
      드롭다운으로 고르게 하면 «고르는 걸 깜빡하고 엉뚱한 큐알을 돌리는» 일이
      생깁니다. 늘어놓으면 그럴 일이 없고 여러 장을 한 번에 내려받기도 편합니다. */
@@ -10935,8 +11007,8 @@ function publicLinkPanel(hash, title, desc){
   };
 
   /* «고르게 하기» 주소는 최종관리자에게만 줍니다.
-     그 주소로 열면 대원 화면에 **상위지역 목록이 전부** 뜹니다. 중간관리자가 그것을
-     자기 지역에 돌리면 다른 상위지역 이름이 그대로 노출됩니다. 중간관리자는
+     그 주소로 열면 대원 화면에 **상위지역 목록이 전부** 뜹니다. 관리자가 그것을
+     자기 지역에 돌리면 다른 상위지역 이름이 그대로 노출됩니다. 관리자는
      자기 상위지역 큐알만 있으면 되므로 아예 만들지 않습니다. */
   let cards = tops.map(r => card(r.id, r.name, r.name + ' 대원용')).join('');
   if(isSuper() && tops.length) cards += card('', '상위지역을 고르게 하기',
