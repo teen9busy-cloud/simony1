@@ -777,7 +777,7 @@ const S = {                    // 앱 상태
    Ctrl+Shift+R 로 강력 새로고침하면 됩니다. */
 // 화면 왼쪽 위에 찍히는 버전 표시입니다. 배포가 실제로 반영됐는지
 // 눈으로 바로 확인할 수 있게, 내용이 바뀔 때마다 이 값을 함께 올립니다.
-const APP_VERSION = '2026-10-08 통계권한확장';
+const APP_VERSION = '2026-10-12 상담사한표';
 
 /* 상단 메뉴에 둘 폼(이 순서대로). 나머지 폼은 내담자 상세 화면에서만 작성합니다.
 
@@ -2695,6 +2695,7 @@ async function deleteRecord(r){
   const { error } = await sb.rpc('trash_record', { p_id: r.id });
   if(error){ toast('지우지 못했습니다: '+error.message, 'bad'); return; }
   toast('휴지통으로 보냈습니다');
+  S._multiStatsCachedRows = null; // 삭제 후 통계 캐시 무효화
   document.querySelectorAll('.overlay').forEach(o=>o.remove());
   if(S.tab) showTab(S.tab);
 }
@@ -2732,6 +2733,7 @@ async function editRecordModal(r){
       const { error } = await sb.from('form_records').update({ data }).eq('id', r.id);
       if(error){ toast('저장하지 못했습니다: '+error.message, 'bad'); return false; }
       toast('기록을 수정했습니다');
+      S._multiStatsCachedRows = null; // 수정 후 통계 캐시 무효화
       if(S.tab) showTab(S.tab);   // 지금 보던 화면을 새 값으로 다시 불러옵니다
       return true;
     },
@@ -2846,6 +2848,7 @@ async function saveRecord(){
   toast(rows.length>1
     ? `${S.form.title}을(를) 저장했습니다 (참여자 ${rows.length}명)`
     : `${S.form.title}을(를) 저장했습니다`);
+  S._multiStatsCachedRows = null; // 저장 후 통계 캐시 무효화 (실적 즉시 반영)
   renderForm();
 }
 
@@ -7386,42 +7389,535 @@ async function adminSimple(){
    ═══════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════
    시모니 1.0 통계 엔진
-   1) 다각도 종합 통계 (renderMultiStats) — 5대 상담 + 긴급콜 + 집단상담 종합,
-      관서별 현황, 4회기 이상 심층상담 누적 실인원, 인구사회학적 분포, 요인 및 조치 분석
-   2) 서식별 단일 통계 (renderSingleFormStats) — 기존 단일 폼 항목별 자동 집계
+   1) 간편 현황판 (renderSimpleStatsView) — 50대 상담사 맞춤형 큰 글씨 카드 대시보드
+   2) 다각도 종합 통계 (renderMultiStats) — 소방청 분기 보고서 5대 상세 탭
+   3) 서식별 단일 통계 (renderSingleFormStats) — 기존 단일 폼 항목별 자동 집계
    ═══════════════════════════════════════════════════ */
 
 const STATS_DEFAULT_START = '2026-10-01';
 
+function getQuarterDates(now = new Date(Date.now() + 9 * 3600000)){
+  const y = now.toISOString().slice(0, 4);
+  const m = parseInt(now.toISOString().slice(5, 7), 10);
+  const q = Math.ceil(m / 3);
+  const qStarts = { 1: '-01-01', 2: '-04-01', 3: '-07-01', 4: '-10-01' };
+  const qEnds = { 1: '-03-31', 2: '-06-30', 3: '-09-30', 4: '-12-31' };
+  let from = y + qStarts[q];
+  let to = y + qEnds[q];
+  if(y === '2026' && from < STATS_DEFAULT_START){
+    from = STATS_DEFAULT_START;
+  }
+  return { y, m, q, from, to };
+}
+
 async function renderStats(){
   const c = $('content');
+  if(!S._statView){
+    S._statView = canManage() ? 'detail' : 'simple';
+  }
+  const view = S._statView;
   const sub = S._statSubTab || 'multi';
   S._statSubTab = sub;
 
-  c.innerHTML = `
-    <div style="display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap">
-      <button class="btn ${sub==='multi'?'':'ghost'}" onclick="setStatSubTab('multi')" style="font-weight:700">
-        📊 다각도 종합 통계
-      </button>
-      <button class="btn ${sub==='single'?'':'ghost'}" onclick="setStatSubTab('single')">
-        📋 서식별 단일 통계
-      </button>
-      <div class="spacer"></div>
-      <span class="hint">소방청 분기 보고서(HWP) 및 현장 상담실적 양식 완벽 호환</span>
-    </div>
-    <div id="statSubContainer"></div>
-  `;
-
-  if(sub === 'single'){
-    await renderSingleFormStats();
+  if(view === 'simple'){
+    c.innerHTML = `<div id="statSimpleContainer"></div>`;
+    await renderSimpleStatsView();
   } else {
-    await renderMultiStats();
+    c.innerHTML = `
+      <div style="display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap">
+        <button class="btn ${sub==='multi'?'':'ghost'}" onclick="setStatSubTab('multi')" style="font-weight:700">
+          📊 다각도 종합 통계
+        </button>
+        <button class="btn ${sub==='single'?'':'ghost'}" onclick="setStatSubTab('single')">
+          📋 서식별 단일 통계
+        </button>
+        <div class="spacer"></div>
+        <button class="btn ghost" onclick="setStatView('simple')" style="color:var(--accent);font-weight:600;font-size:14.5px;">
+          👤 내 간편 현황판 보기
+        </button>
+      </div>
+      <div id="statSubContainer"></div>
+    `;
+
+    if(sub === 'single'){
+      await renderSingleFormStats();
+    } else {
+      await renderMultiStats();
+    }
   }
+}
+
+function setStatView(v){
+  S._statView = v;
+  renderStats();
 }
 
 function setStatSubTab(tab){
   S._statSubTab = tab;
   renderStats();
+}
+
+/* ───────────────────────────────────────────────────
+   1) 상담사 전용 간편 현황판 (renderSimpleStatsView) — 한 표에 숫자만
+   ─────────────────────────────────────────────────── */
+async function renderSimpleStatsView(){
+  const sc = $('statSimpleContainer');
+  if(!sc) return;
+
+  const now = new Date(Date.now() + 9 * 3600000);
+  const { y, m, q, from: qFrom, to: qTo } = getQuarterDates(now);
+  const today = now.toISOString().slice(0, 10);
+
+  if(!S._statMultiPeriodType) S._statMultiPeriodType = 'quarter';
+  if(!S._statMultiFrom || !S._statMultiTo){
+    S._statMultiFrom = qFrom;
+    S._statMultiTo = qTo;
+  }
+
+  const periodType = S._statMultiPeriodType;
+  const from = S._statMultiFrom;
+  const to = S._statMultiTo;
+
+  let periodLabel = `${y}년 ${q}분기 (${from} ~ ${to})`;
+  if(periodType === 'month') periodLabel = `${y}년 ${m}월 (${from} ~ ${to})`;
+  else if(periodType === 'all') periodLabel = `${y}년 전체 (${from} ~ ${to})`;
+  else if(periodType === 'custom') periodLabel = `직접 선택 (${from} ~ ${to})`;
+
+  sc.innerHTML = `
+    <!-- 타이틀 -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+      <div>
+        <h2 style="font-size:22px;font-weight:800;margin:0 0 4px 0;color:var(--text);">
+          👤 ${esc(S.me?.name||'상담사')} 선생님의 상담 실적
+        </h2>
+        <div style="font-size:14.5px;color:var(--text-muted);">
+          선택 기간: <b style="color:var(--text);">${periodLabel}</b>
+        </div>
+      </div>
+      <div>
+        <button class="btn ghost" onclick="refreshMultiStats()" style="font-size:14px;padding:7px 13px;">
+          🔄 새로고침
+        </button>
+      </div>
+    </div>
+
+    <!-- 날짜 선택 바 (빠른 버튼 3개 + 직접 날짜 선택) -->
+    <div class="panel" style="margin-bottom:20px;padding:16px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <span style="font-size:14.5px;font-weight:700;margin-right:4px;color:var(--text);">빠른 기간:</span>
+        <button class="btn ${periodType==='quarter'?'':'ghost'}" 
+                onclick="setSimpleQuickDate('quarter')" 
+                style="padding:8px 16px;font-size:15px;font-weight:700;border-radius:8px;">
+          이번 분기 (${q}분기)
+        </button>
+        <button class="btn ${periodType==='month'?'':'ghost'}" 
+                onclick="setSimpleQuickDate('month')" 
+                style="padding:8px 16px;font-size:15px;font-weight:700;border-radius:8px;">
+          이번 달 (${m}월)
+        </button>
+        <button class="btn ${periodType==='all'?'':'ghost'}" 
+                onclick="setSimpleQuickDate('all')" 
+                style="padding:8px 16px;font-size:15px;font-weight:700;border-radius:8px;">
+          올해 전체
+        </button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;">
+        <span style="font-size:14px;color:var(--text-muted);font-weight:600;">날짜 직접 선택:</span>
+        <input type="date" id="simp_from" value="${from}" style="padding:6px 10px;font-size:14px;border:1px solid var(--line);border-radius:6px;">
+        <span style="color:var(--text-muted);">~</span>
+        <input type="date" id="simp_to" value="${to}" style="padding:6px 10px;font-size:14px;border:1px solid var(--line);border-radius:6px;">
+        <button class="btn" onclick="applySimpleCustomDate()" style="padding:6px 14px;font-size:14px;font-weight:700;">
+          조회
+        </button>
+      </div>
+    </div>
+
+    <!-- 한 표에 숫자만 들어가는 메인 실적표 -->
+    <div id="simpleBoardBody">
+      <div class="panel" style="padding:30px;text-align:center;"><div class="empty">실적을 집계하고 있습니다…</div></div>
+    </div>
+  `;
+
+  await loadAndRenderSimpleBoard();
+}
+
+function setSimpleQuickDate(type){
+  const now = new Date(Date.now() + 9 * 3600000);
+  const { y, m, q, from: qFrom, to: qTo } = getQuarterDates(now);
+  const today = now.toISOString().slice(0, 10);
+  S._statMultiPeriodType = type;
+  if(type === 'quarter'){
+    S._statMultiFrom = qFrom;
+    S._statMultiTo = qTo;
+  } else if(type === 'month'){
+    S._statMultiFrom = y + '-' + String(m).padStart(2,'0') + '-01';
+    S._statMultiTo = today;
+  } else if(type === 'all'){
+    S._statMultiFrom = (y === '2026' ? STATS_DEFAULT_START : (y + '-01-01'));
+    S._statMultiTo = today;
+  }
+  renderSimpleStatsView();
+}
+
+function applySimpleCustomDate(){
+  const f = $('simp_from')?.value;
+  const t = $('simp_to')?.value;
+  if(!f || !t){ toast('시작일과 종료일을 모두 선택해 주세요.', 'bad'); return; }
+  if(f > t){ toast('시작일이 종료일보다 뒤일 수 없습니다.', 'bad'); return; }
+  S._statMultiPeriodType = 'custom';
+  S._statMultiFrom = f;
+  S._statMultiTo = t;
+  renderSimpleStatsView();
+}
+
+async function loadAndRenderSimpleBoard(){
+  const body = $('simpleBoardBody');
+  if(!body) return;
+
+  const from = S._statMultiFrom || STATS_DEFAULT_START;
+  const to = S._statMultiTo || new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+
+  let rows = S._multiStatsCachedRows;
+  if(!rows){
+    try {
+      rows = await fetchAllMultiStatRows();
+    } catch(err){
+      body.innerHTML = `<div class="panel"><div class="msg bad">집계 중 오류가 발생했습니다: ${esc(err.message)}</div></div>`;
+      return;
+    }
+  }
+
+  // 선택 기간 필터링
+  const periodRows = (rows || []).filter(r => r.dateStr >= from && r.dateStr <= to);
+  // 간편 화면: 공용 상태를 건드리지 않고 오직 본인 작성분만 로컬 필터링
+  const myRows = periodRows.filter(r => r.author_id === S.me?.id);
+
+  // 공통 집계 버킷 산출
+  const { bMap } = buildMultiBuckets(myRows, from, to);
+  const t = bMap.total;
+
+  const n = (v, u) => `${(v||0).toLocaleString()}${u}`;
+  const row = (label, cnt, ppl, opt={}) => {
+    const isZero = (!cnt || cnt === '0건' || cnt === '0회') && (!ppl || ppl === '0명');
+    let trStyle = 'border-bottom:1px solid var(--line);height:48px;';
+    if(opt.total){
+      trStyle += 'font-weight:800;background:var(--accent-soft);border-top:2px solid var(--text);border-bottom:2px solid var(--text);';
+    } else if(isZero){
+      trStyle += 'opacity:0.55;';
+    }
+    const tdLabelStyle = opt.sub ? 'padding-left:32px;font-size:15px;color:var(--text-muted);' : 'font-size:16.5px;font-weight:600;';
+    return `<tr style="${trStyle}">
+      <td style="${tdLabelStyle}">${esc(label)}</td>
+      <td style="text-align:right;font-size:16.5px;padding-right:20px;font-weight:${opt.total?'800':'600'};">${cnt==null?'-':cnt}</td>
+      <td style="text-align:right;font-size:16.5px;padding-right:20px;font-weight:${opt.total?'800':'600'};">${ppl==null?'-':ppl}</td>
+    </tr>`;
+  };
+
+  body.innerHTML = `
+    <div class="panel" style="padding:20px;border-radius:12px;">
+      <div class="scroll-x">
+        <table class="list-table" style="font-size:16.5px;width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="height:44px;background:var(--sub-bg, #f8fafc);border-bottom:2px solid var(--line);">
+              <th style="text-align:left;font-size:16px;font-weight:700;">상담 구분</th>
+              <th style="text-align:right;font-size:16px;font-weight:700;padding-right:20px;width:160px;">횟수</th>
+              <th style="text-align:right;font-size:16px;font-weight:700;padding-right:20px;width:160px;">만난 분</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${row('스크리닝', n(t.screen.cnt,'건'), n(t.screen.ppl.size,'명'))}
+            ${row('심층상담', n(t.indepth.cnt,'건'), n(t.indepth.ppl.size,'명'))}
+            ${row('└ 이번 기간 4회기째 상담한 분', null, n(t.over4.ppl.size,'명'), {sub:1})}
+            ${row('생애주기 상담', n(t.life.cnt,'건'), n(t.life.ppl.size,'명'))}
+            ${row('└ 그중 심리검사', n(t.lifeTest.cnt,'건'), null, {sub:1})}
+            ${row('대형재난 출동대원 심리상담', n(t.disaster.cnt,'건'), n(t.disaster.ppl.size,'명'))}
+            ${row('긴급심리지원', n(t.emergency.cnt,'건'), n(t.emergency.ppl.size,'명'))}
+            ${row('개인상담 합계', n(t.personalTotal.cnt,'건'), n(t.personalTotal.ppl.size,'명'), {total:1})}
+            ${row('집단상담', n(t.group.sessions.size,'회'), n(t.group.pplDedup.size,'명'))}
+            ${row('└ 참여 연인원', null, n(t.group.pplRaw,'명'), {sub:1})}
+            ${row('긴급콜 상담', n(t.callRec.cnt,'건'), '–')}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:14px;font-size:13.5px;color:var(--text-muted);line-height:1.5;">
+        ※ 본인(${esc(S.me?.name||'상담사')})이 입력한 상담 실적 기준입니다.<br>
+        ※ '만난 분'은 같은 분을 한 번만 센 숫자라 종류별 합보다 개인상담 합계가 작을 수 있습니다.
+      </div>
+
+      <div style="text-align:right;margin-top:16px;padding-top:10px;border-top:1px dashed var(--line);">
+        <a href="javascript:setStatView('detail')" style="color:var(--text-muted);font-size:13.5px;text-decoration:underline;">
+          소방청 보고서 상세 표 보기
+        </a>
+      </div>
+    </div>
+  `;
+}
+
+/* ───────────────────────────────────────────────────
+   공통 집계 버킷 생성 함수
+   ─────────────────────────────────────────────────── */
+function initMultiBucket(){
+  return {
+    screen: { ppl: new Set(), cnt: 0 },
+    indepth: { ppl: new Set(), cnt: 0 },
+    over4: { ppl: new Set() },
+    life: { ppl: new Set(), cnt: 0 },
+    lifeTest: { ppl: new Set(), cnt: 0 },
+    disaster: { ppl: new Set(), cnt: 0 },
+    emergency: { ppl: new Set(), cnt: 0 },
+    personalTotal: { ppl: new Set(), cnt: 0 },
+    callOps: { days: 0, cnt: 0 },
+    callRec: { cnt: 0 },
+    group: { sessions: new Set(), pplRaw: 0, pplDedup: new Set() }
+  };
+}
+
+function buildMultiBuckets(rows, from, to){
+  const monthSet = new Set();
+  (rows || []).forEach(r => { if(/^\d{4}-\d{2}$/.test(r.monthStr)) monthSet.add(r.monthStr); });
+  if(from && to && monthSet.size === 0){
+    monthSet.add(from.slice(0, 7));
+    monthSet.add(to.slice(0, 7));
+  }
+  const months = Array.from(monthSet).sort();
+
+  const bMap = { total: initMultiBucket() };
+  months.forEach(m => { bMap[m] = initMultiBucket(); });
+
+  (rows || []).forEach(r => {
+    const m = r.monthStr;
+    const b = bMap[m];
+    const tot = bMap.total;
+
+    if(r.slug === 'screening'){
+      tot.screen.cnt++; if(b) b.screen.cnt++;
+      tot.screen.ppl.add(r.userKey); if(b) b.screen.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'indepth'){
+      tot.indepth.cnt++; if(b) b.indepth.cnt++;
+      tot.indepth.ppl.add(r.userKey); if(b) b.indepth.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+      if(r.is4thIndepth){
+        tot.over4.ppl.add(r.userKey); if(b) b.over4.ppl.add(r.userKey);
+      }
+    } else if(r.slug === 'lifecycle'){
+      tot.life.cnt++; if(b) b.life.cnt++;
+      tot.life.ppl.add(r.userKey); if(b) b.life.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+      if(r.life_test){
+        tot.lifeTest.cnt++; if(b) b.lifeTest.cnt++;
+        tot.lifeTest.ppl.add(r.userKey); if(b) b.lifeTest.ppl.add(r.userKey);
+      }
+    } else if(r.slug === 'disaster'){
+      tot.disaster.cnt++; if(b) b.disaster.cnt++;
+      tot.disaster.ppl.add(r.userKey); if(b) b.disaster.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'emergency'){
+      tot.emergency.cnt++; if(b) b.emergency.cnt++;
+      tot.emergency.ppl.add(r.userKey); if(b) b.emergency.ppl.add(r.userKey);
+      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
+      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
+    } else if(r.slug === 'ops-callcenter'){
+      tot.callOps.days += r.opendays; if(b) b.callOps.days += r.opendays;
+      tot.callOps.cnt += r.calls; if(b) b.callOps.cnt += r.calls;
+    } else if(r.slug === 'call'){
+      tot.callRec.cnt++; if(b) b.callRec.cnt++;
+    } else if(r.slug === 'group'){
+      const sid = r.group_id || r.id;
+      tot.group.sessions.add(sid); if(b) b.group.sessions.add(sid);
+      tot.group.pplRaw++; if(b) b.group.pplRaw++;
+      tot.group.pplDedup.add(r.userKey); if(b) b.group.pplDedup.add(r.userKey);
+    }
+  });
+
+  return { months, bMap };
+}
+
+/* ───────────────────────────────────────────────────
+   공통 데이터 페칭 함수 (rows 전수 로드 및 캐시)
+   ─────────────────────────────────────────────────── */
+async function fetchAllMultiStatRows(){
+  if(S._multiStatsCachedRows) return S._multiStatsCachedRows;
+
+  // 1. 폼 메타데이터 조회
+  const { data: allForms, error: fErr } = await sb.from('forms').select('id, slug, title');
+  if(fErr) throw fErr;
+
+  const slugMap = {};
+  const targetFormIds = [];
+  (allForms || []).forEach(f => {
+    slugMap[f.id] = f.slug;
+    if(MULTI_TARGET_SLUGS.includes(f.slug)) targetFormIds.push(f.id);
+  });
+
+  if(!targetFormIds.length) return [];
+
+  // 2. 지역 범위 산출
+  const reg = S._statMultiRegion || '';
+  let rids = null;
+  if(reg){
+    rids = regionBranch(reg);
+    if(!rids.length) rids = [reg];
+  } else if(!isSuper()){
+    rids = S.regions.map(r=>r.id);
+  }
+
+  // 3. 기록 페칭
+  const selectCols = 'id,form_id,region_id,client_id,client_internal_id,client_name,birth_date,gender,group_id,created_at,author_id,author_name,' +
+    'consult_date:data->>consult_date,station:data->>station,rank:data->>rank,age_group:data->>age_group,' +
+    'job:data->>job,duty:data->>duty,stress:data->>stress,stress_factor:data->>stress_factor,' +
+    'problem_type:data->problem_type,path:data->>path,method:data->>method,place:data->>place,action:data->>action,' +
+    'disaster_action:data->>disaster_action,call_action_plan:data->>call_action_plan,' +
+    'prev_exp:data->>prev_exp,med_exp:data->>med_exp,' +
+    'sub_cat:data->>sub_cat,sub_cat_life:data->>sub_cat_life,life_test_type:data->>life_test_type,' +
+    'mdate:data->>mdate,opendays:data->>opendays,calls:data->>calls';
+
+  const buildQuery = () => {
+    let q = sb.from('form_records')
+      .select(selectCols, { count: 'exact' })
+      .in('form_id', targetFormIds)
+      .order('id');
+    if(rids && rids.length > 0){
+      q = q.in('region_id', rids);
+    }
+    return q;
+  };
+
+  const rawRecs = await svFetchAll(buildQuery);
+
+  // 3-1. 작성자 목록 수집
+  const authMap = new Map();
+  rawRecs.forEach(r => {
+    if(r.author_id && r.author_name) authMap.set(r.author_id, r.author_name);
+  });
+  S._multiStatsAuthors = authMap;
+
+  // 4. 결측 내담자 인적사항 보완
+  const missingClientIds = Array.from(new Set(
+    rawRecs.filter(r => r.client_id && (!r.gender || !r.birth_date)).map(r => r.client_id)
+  ));
+  const clientMap = {};
+  for(let i=0; i<missingClientIds.length; i+=1000){
+    const chunk = missingClientIds.slice(i, i+1000);
+    const { data: cData } = await sb.from('clients').select('id, gender, birth_date, extra').in('id', chunk);
+    (cData||[]).forEach(c => { clientMap[c.id] = c; });
+  }
+
+  // 5. 전처리 및 정규화
+  const rows = rawRecs.map(r => {
+    const slug = slugMap[r.form_id] || '';
+    const userKey = r.client_id ? ('ID:' + r.client_id) :
+      (r.client_internal_id ? ('INT:' + r.client_internal_id) :
+      ('NB:' + (r.client_name || '').trim() + '_' + (r.birth_date || '').trim()));
+
+    let dStr = (r.consult_date || r.mdate || '').slice(0, 10);
+    if(!dStr && r.created_at){
+      const kst = new Date(new Date(r.created_at).getTime() + 9 * 3600000);
+      dStr = kst.toISOString().slice(0, 10);
+    }
+
+    const station = (r.station || '').trim() || (regionNameOf(r.region_id) || '소속 미기재');
+
+    let gender = (r.gender || clientMap[r.client_id]?.gender || '').trim();
+    if(gender === '남' || gender === '남자') gender = '남';
+    else if(gender === '여' || gender === '여자') gender = '여';
+    else gender = '미상';
+
+    const bDate = r.birth_date || clientMap[r.client_id]?.birth_date || '';
+    let ageBand = '미상';
+    if(bDate && dStr){
+      const b = new Date(bDate);
+      const c = new Date(dStr);
+      if(!isNaN(b) && !isNaN(c)){
+        let a = c.getFullYear() - b.getFullYear();
+        const mDiff = c.getMonth() - b.getMonth();
+        if(mDiff < 0 || (mDiff === 0 && c.getDate() < b.getDate())) a--;
+        if(a >= 0){
+          if(a < 30) ageBand = '20대 이하';
+          else if(a < 40) ageBand = '30대';
+          else if(a < 50) ageBand = '40대';
+          else if(a < 60) ageBand = '50대';
+          else ageBand = '60대 이상';
+        }
+      }
+    }
+    if(ageBand === '미상' && r.age_group){
+      const ag = String(r.age_group);
+      if(ag.includes('20')) ageBand = '20대 이하';
+      else if(ag.includes('30')) ageBand = '30대';
+      else if(ag.includes('40')) ageBand = '40대';
+      else if(ag.includes('50')) ageBand = '50대';
+      else if(ag.includes('60')) ageBand = '60대 이상';
+    }
+
+    const rawRank = r.rank || clientMap[r.client_id]?.extra?.rank || '';
+    const normRank = normalizeMultiRank(rawRank);
+    const normJob = normalizeMultiJob(r.job, r.duty);
+
+    return {
+      id: r.id,
+      slug,
+      userKey,
+      userName: (r.client_name || '').trim(),
+      dateStr: dStr,
+      monthStr: dStr ? dStr.slice(0, 7) : '미상',
+      station,
+      gender,
+      ageBand,
+      normRank,
+      normJob,
+      group_id: r.group_id,
+      author_id: r.author_id,
+      author_name: r.author_name,
+      stress: r.stress || r.stress_factor || '',
+      problem_type: r.problem_type,
+      path: r.path || '',
+      method: r.method || '',
+      place: r.place || '',
+      action: r.action || r.disaster_action || r.call_action_plan || '',
+      prev_exp: r.prev_exp || r.med_exp || '',
+      sub_cat: r.sub_cat || r.sub_cat_life || '',
+      life_test: !!(r.life_test_type && String(r.life_test_type).trim()),
+      opendays: Number(r.opendays) || 0,
+      calls: Number(r.calls) || 0,
+      created_at: r.created_at
+    };
+  });
+
+  // 6. 직무 결측치 스마트 보정 (personBestJob)
+  const personBestJob = {};
+  const sortedForJob = rows.slice().sort((a,b)=> (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||''));
+  sortedForJob.forEach(r => {
+    if(r.normJob && r.normJob !== '8. 기타'){
+      personBestJob[r.userKey] = r.normJob;
+    } else if(r.normJob === '8. 기타' && !personBestJob[r.userKey]){
+      personBestJob[r.userKey] = '8. 기타';
+    }
+  });
+  rows.forEach(r => {
+    r.resolvedJob = personBestJob[r.userKey] || r.normJob || '미상';
+  });
+
+  // 7. 심층상담 4회기 이상 판정 & 회기 번호 기록
+  const indepthRecs = rows.filter(r => r.slug === 'indepth').sort((a,b) =>
+    (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||'')
+  );
+  const indepthCount = {};
+  indepthRecs.forEach(r => {
+    indepthCount[r.userKey] = (indepthCount[r.userKey] || 0) + 1;
+    r.indepthNo = indepthCount[r.userKey];
+    if(indepthCount[r.userKey] === 4){
+      r.is4thIndepth = true;
+    }
+  });
+
+  S._multiStatsCachedRows = rows;
+  return rows;
 }
 
 /* ───────────────────────────────────────────────────
@@ -7680,21 +8176,20 @@ async function renderMultiStats(){
 
 function setMultiStatQuickDate(type){
   const now = new Date(Date.now() + 9 * 3600000);
-  const y = now.toISOString().slice(0, 4);
-  const m = now.toISOString().slice(5, 7);
+  const { y, m, q, from: qFrom, to: qTo } = getQuarterDates(now);
   const today = now.toISOString().slice(0, 10);
-  if(type === 'q4'){
-    S._statMultiFrom = y + '-10-01';
-    S._statMultiTo = y + '-12-31';
+  S._statMultiPeriodType = type;
+  if(type === 'q4' || type === 'quarter'){
+    S._statMultiFrom = qFrom;
+    S._statMultiTo = qTo;
   } else if(type === 'month'){
-    S._statMultiFrom = y + '-' + m + '-01';
+    S._statMultiFrom = y + '-' + String(m).padStart(2,'0') + '-01';
     S._statMultiTo = today;
   } else if(type === 'all'){
-    S._statMultiFrom = STATS_DEFAULT_START;
+    S._statMultiFrom = (y === '2026' ? STATS_DEFAULT_START : (y + '-01-01'));
     S._statMultiTo = today;
   }
-  // A. 캐시 비우기 (조회 범위 변경 시 항상 최신 페칭 보장)
-  S._multiStatsCachedRows = null;
+  // 날짜 전환 시 캐시 유지 (인메모리 필터링으로 0ms 즉시 반영)
   renderMultiStats();
 }
 
@@ -7739,180 +8234,7 @@ async function loadAndRenderMultiStats(){
   let rows = S._multiStatsCachedRows;
   if(!rows){
     try {
-      // 1. 폼 메타데이터 조회
-      const { data: allForms, error: fErr } = await sb.from('forms').select('id, slug, title');
-      if(fErr) throw fErr;
-
-      const slugMap = {};
-      const targetFormIds = [];
-      (allForms || []).forEach(f => {
-        slugMap[f.id] = f.slug;
-        if(MULTI_TARGET_SLUGS.includes(f.slug)) targetFormIds.push(f.id);
-      });
-
-      if(!targetFormIds.length){
-        body.innerHTML = '<div class="panel"><div class="empty">대상 서식이 등록되어 있지 않습니다.</div></div>';
-        return;
-      }
-
-      // 2. 지역 범위 산출
-      let rids = null;
-      if(reg){
-        rids = regionBranch(reg);
-        if(!rids.length) rids = [reg];
-      } else if(!isSuper()){
-        rids = S.regions.map(r=>r.id);
-      }
-
-      // 3. 기록 페칭 (B. 늦게 입력한 기록 누락 방지: created_at 제한 없이 consult_date 기준 인메모리 필터링)
-      const selectCols = 'id,form_id,region_id,client_id,client_internal_id,client_name,birth_date,gender,group_id,created_at,author_id,author_name,' +
-        'consult_date:data->>consult_date,station:data->>station,rank:data->>rank,age_group:data->>age_group,' +
-        'job:data->>job,duty:data->>duty,stress:data->>stress,stress_factor:data->>stress_factor,' +
-        'problem_type:data->problem_type,path:data->>path,method:data->>method,place:data->>place,action:data->>action,' +
-        'disaster_action:data->>disaster_action,call_action_plan:data->>call_action_plan,' +
-        'prev_exp:data->>prev_exp,med_exp:data->>med_exp,' +
-        'sub_cat:data->>sub_cat,sub_cat_life:data->>sub_cat_life,life_test_type:data->>life_test_type,' +
-        'mdate:data->>mdate,opendays:data->>opendays,calls:data->>calls';
-
-      const buildQuery = () => {
-        let q = sb.from('form_records')
-          .select(selectCols, { count: 'exact' })
-          .in('form_id', targetFormIds)
-          .order('id');
-        if(rids && rids.length > 0){
-          q = q.in('region_id', rids);
-        }
-        return q;
-      };
-
-      const rawRecs = await svFetchAll(buildQuery);
-
-      // 3-1. 작성자(상담사) 목록 수집 캐시
-      const authMap = new Map();
-      rawRecs.forEach(r => {
-        if(r.author_id && r.author_name) authMap.set(r.author_id, r.author_name);
-      });
-      S._multiStatsAuthors = authMap;
-
-      // 4. 결측 내담자 인적사항 보완 (필요 시)
-      const missingClientIds = Array.from(new Set(
-        rawRecs.filter(r => r.client_id && (!r.gender || !r.birth_date)).map(r => r.client_id)
-      ));
-      const clientMap = {};
-      for(let i=0; i<missingClientIds.length; i+=1000){
-        const chunk = missingClientIds.slice(i, i+1000);
-        const { data: cData } = await sb.from('clients').select('id, gender, birth_date, extra').in('id', chunk);
-        (cData||[]).forEach(c => { clientMap[c.id] = c; });
-      }
-
-      // 5. 전처리 및 정규화
-      rows = rawRecs.map(r => {
-        const slug = slugMap[r.form_id] || '';
-        const userKey = r.client_id ? ('ID:' + r.client_id) :
-          (r.client_internal_id ? ('INT:' + r.client_internal_id) :
-          ('NB:' + (r.client_name || '').trim() + '_' + (r.birth_date || '').trim()));
-
-        let dStr = (r.consult_date || r.mdate || '').slice(0, 10);
-        if(!dStr && r.created_at){
-          const kst = new Date(new Date(r.created_at).getTime() + 9 * 3600000);
-          dStr = kst.toISOString().slice(0, 10);
-        }
-
-        const station = (r.station || '').trim() || (regionNameOf(r.region_id) || '소속 미기재');
-
-        let gender = (r.gender || clientMap[r.client_id]?.gender || '').trim();
-        if(gender === '남' || gender === '남자') gender = '남';
-        else if(gender === '여' || gender === '여자') gender = '여';
-        else gender = '미상';
-
-        const bDate = r.birth_date || clientMap[r.client_id]?.birth_date || '';
-        let ageBand = '미상';
-        if(bDate && dStr){
-          const b = new Date(bDate);
-          const c = new Date(dStr);
-          if(!isNaN(b) && !isNaN(c)){
-            let a = c.getFullYear() - b.getFullYear();
-            const mDiff = c.getMonth() - b.getMonth();
-            if(mDiff < 0 || (mDiff === 0 && c.getDate() < b.getDate())) a--;
-            if(a >= 0){
-              if(a < 30) ageBand = '20대 이하';
-              else if(a < 40) ageBand = '30대';
-              else if(a < 50) ageBand = '40대';
-              else if(a < 60) ageBand = '50대';
-              else ageBand = '60대 이상';
-            }
-          }
-        }
-        if(ageBand === '미상' && r.age_group){
-          const ag = String(r.age_group);
-          if(ag.includes('20')) ageBand = '20대 이하';
-          else if(ag.includes('30')) ageBand = '30대';
-          else if(ag.includes('40')) ageBand = '40대';
-          else if(ag.includes('50')) ageBand = '50대';
-          else if(ag.includes('60')) ageBand = '60대 이상';
-        }
-
-        const rawRank = r.rank || clientMap[r.client_id]?.extra?.rank || '';
-        const normRank = normalizeMultiRank(rawRank);
-        const normJob = normalizeMultiJob(r.job, r.duty);
-
-        return {
-          id: r.id,
-          slug,
-          userKey,
-          userName: (r.client_name || '').trim(),
-          dateStr: dStr,
-          monthStr: dStr ? dStr.slice(0, 7) : '미상',
-          station,
-          gender,
-          ageBand,
-          normRank,
-          normJob,
-          group_id: r.group_id,
-          author_id: r.author_id,
-          author_name: r.author_name,
-          stress: r.stress || r.stress_factor || '',
-          problem_type: r.problem_type,
-          path: r.path || '',
-          method: r.method || '',
-          place: r.place || '',
-          action: r.action || r.disaster_action || r.call_action_plan || '',
-          prev_exp: r.prev_exp || r.med_exp || '',
-          sub_cat: r.sub_cat || r.sub_cat_life || '',
-          life_test: !!(r.life_test_type && String(r.life_test_type).trim()),
-          opendays: Number(r.opendays) || 0,
-          calls: Number(r.calls) || 0,
-          created_at: r.created_at
-        };
-      });
-
-      // 6. 직무 결측치 스마트 보정 (personBestJob)
-      const personBestJob = {};
-      const sortedForJob = rows.slice().sort((a,b)=> (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||''));
-      sortedForJob.forEach(r => {
-        if(r.normJob && r.normJob !== '8. 기타'){
-          personBestJob[r.userKey] = r.normJob;
-        } else if(r.normJob === '8. 기타' && !personBestJob[r.userKey]){
-          personBestJob[r.userKey] = '8. 기타';
-        }
-      });
-      rows.forEach(r => {
-        r.resolvedJob = personBestJob[r.userKey] || r.normJob || '미상';
-      });
-
-      // 7. 심층상담 4회기 이상 판정 (날짜 오름차순으로 누적 4회차 시점 식별)
-      const indepthRecs = rows.filter(r => r.slug === 'indepth').sort((a,b) =>
-        (a.dateStr||'').localeCompare(b.dateStr||'') || (a.created_at||'').localeCompare(b.created_at||'')
-      );
-      const indepthCount = {};
-      indepthRecs.forEach(r => {
-        indepthCount[r.userKey] = (indepthCount[r.userKey] || 0) + 1;
-        if(indepthCount[r.userKey] === 4){
-          r.is4thIndepth = true;
-        }
-      });
-
-      S._multiStatsCachedRows = rows;
+      rows = await fetchAllMultiStatRows();
     } catch(err){
       body.innerHTML = `<div class="panel"><div class="msg bad">집계 중 오류가 발생했습니다: ${esc(err.message)}</div></div>`;
       return;
@@ -7920,7 +8242,7 @@ async function loadAndRenderMultiStats(){
   }
 
   // 선택한 기간 [from, to] 에 속하는 기록 필터링
-  let periodRows = rows.filter(r => r.dateStr >= from && r.dateStr <= to);
+  let periodRows = (rows || []).filter(r => r.dateStr >= from && r.dateStr <= to);
 
   // 작성자(상담사) 필터 적용 (4회기 도달 판정 후 인메모리 필터링)
   const curAuthor = S._statMultiAuthor;
@@ -7936,87 +8258,14 @@ async function loadAndRenderMultiStats(){
 }
 
 /* ───────────────────────────────────────────────────
-   탭 1: 종합 상담 실적표 (월별 추이 & 누적 합계)
+   구현부 탭 1 ~ 탭 5
    ─────────────────────────────────────────────────── */
+
 function renderMultiTab1(rows, from, to, dedup){
   const el = $('multiStatContent');
   if(!el) return;
 
-  const monthSet = new Set();
-  rows.forEach(r => { if(/^\d{4}-\d{2}$/.test(r.monthStr)) monthSet.add(r.monthStr); });
-  if(monthSet.size === 0){
-    monthSet.add(from.slice(0, 7));
-    monthSet.add(to.slice(0, 7));
-  }
-  const months = Array.from(monthSet).sort();
-
-  const initBucket = () => ({
-    screen: { ppl: new Set(), cnt: 0 },
-    indepth: { ppl: new Set(), cnt: 0 },
-    over4: { ppl: new Set() },
-    life: { ppl: new Set(), cnt: 0 },
-    lifeTest: { ppl: new Set(), cnt: 0 },
-    disaster: { ppl: new Set(), cnt: 0 },
-    emergency: { ppl: new Set(), cnt: 0 },
-    personalTotal: { ppl: new Set(), cnt: 0 },
-    callOps: { days: 0, cnt: 0 },
-    callRec: { cnt: 0 },
-    group: { sessions: new Set(), pplRaw: 0, pplDedup: new Set() }
-  });
-
-  const bMap = { total: initBucket() };
-  months.forEach(m => { bMap[m] = initBucket(); });
-
-  rows.forEach(r => {
-    const m = r.monthStr;
-    const b = bMap[m];
-    const tot = bMap.total;
-
-    if(r.slug === 'screening'){
-      tot.screen.cnt++; if(b) b.screen.cnt++;
-      tot.screen.ppl.add(r.userKey); if(b) b.screen.ppl.add(r.userKey);
-      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
-      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
-    } else if(r.slug === 'indepth'){
-      tot.indepth.cnt++; if(b) b.indepth.cnt++;
-      tot.indepth.ppl.add(r.userKey); if(b) b.indepth.ppl.add(r.userKey);
-      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
-      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
-      if(r.is4thIndepth){
-        tot.over4.ppl.add(r.userKey); if(b) b.over4.ppl.add(r.userKey);
-      }
-    } else if(r.slug === 'lifecycle'){
-      tot.life.cnt++; if(b) b.life.cnt++;
-      tot.life.ppl.add(r.userKey); if(b) b.life.ppl.add(r.userKey);
-      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
-      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
-      if(r.life_test){
-        tot.lifeTest.cnt++; if(b) b.lifeTest.cnt++;
-        tot.lifeTest.ppl.add(r.userKey); if(b) b.lifeTest.ppl.add(r.userKey);
-      }
-    } else if(r.slug === 'disaster'){
-      tot.disaster.cnt++; if(b) b.disaster.cnt++;
-      tot.disaster.ppl.add(r.userKey); if(b) b.disaster.ppl.add(r.userKey);
-      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
-      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
-    } else if(r.slug === 'emergency'){
-      tot.emergency.cnt++; if(b) b.emergency.cnt++;
-      tot.emergency.ppl.add(r.userKey); if(b) b.emergency.ppl.add(r.userKey);
-      tot.personalTotal.cnt++; if(b) b.personalTotal.cnt++;
-      tot.personalTotal.ppl.add(r.userKey); if(b) b.personalTotal.ppl.add(r.userKey);
-    } else if(r.slug === 'ops-callcenter'){
-      tot.callOps.days += r.opendays; if(b) b.callOps.days += r.opendays;
-      tot.callOps.cnt += r.calls; if(b) b.callOps.cnt += r.calls;
-    } else if(r.slug === 'call'){
-      tot.callRec.cnt++; if(b) b.callRec.cnt++;
-    } else if(r.slug === 'group'){
-      const sid = r.group_id || r.id;
-      tot.group.sessions.add(sid); if(b) b.group.sessions.add(sid);
-      tot.group.pplRaw++; if(b) b.group.pplRaw++;
-      tot.group.pplDedup.add(r.userKey); if(b) b.group.pplDedup.add(r.userKey);
-    }
-  });
-
+  const { months, bMap } = buildMultiBuckets(rows, from, to);
   const getPpl = (pSet, rawCnt) => (dedup === 'dedup' ? pSet.size : rawCnt);
 
   let thead = `<tr>
