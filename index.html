@@ -3067,6 +3067,8 @@ function renderAdmin(sub){
                    ['listup','리스트업'],  ['trash','휴지통']]],
     ['설문·검사', [['survey','만족도 설문'], ['simple','간이검사'],
                    ['upload','검사 업로드']]],
+    ['돌보니',    [['dolboni_qr','앱 배포 QR'], ['dolboni_stats','돌보니 현황'],
+                   ['dolboni_counsel','상담 신청 접수']]],
     ['설정',      [['users','사용자'], ['regions','지역'], ['master','상세소속'],
                    ['forms','폼과 항목'], ['sync','명부 올리기'],
                    ['audit','수정 로그'], ['settings','설정']]],
@@ -3110,6 +3112,9 @@ function renderAdmin(sub){
   else if(sub==='sync') adminSync();
   else if(sub==='upload') adminUpload();
   else if(sub==='settings') adminSettings();
+  else if(sub==='dolboni_qr') adminDolboniQr();
+  else if(sub==='dolboni_stats') adminDolboniStats();
+  else if(sub==='dolboni_counsel') adminDolboniCounsel();
   else adminUsers();
 }
 
@@ -5752,6 +5757,13 @@ async function renderHome(){
   if(!canManage()){
     html += qbtn('통계','내 실적 및 관할 통계 보기',"openTab('stats')");
   }
+  html += `</div>`;
+
+  // ── 🌿 돌보니 (소방 마음건강 마일리지 & 모바일 쉼터)
+  html += `<div class="eyebrow" style="color:var(--accent);font-weight:bold;">🌿 돌보니 (소방 마음건강 마일리지)</div><div class="quick">`;
+  html += qbtn('돌보니 앱 배포 QR','대원 스마트폰 배포·인쇄 안내문','openDolboniQrModal()');
+  html += qbtn('돌보니 참여 현황','관서별 회복시간·마일리지 통계',"openTab('admin:dolboni_stats')");
+  html += qbtn('돌보니 상담 접수 대기','앱을 통한 찾아가는 상담실 신청',"openTab('admin:dolboni_counsel')");
   html += `</div>`;
 
   // ── 검사
