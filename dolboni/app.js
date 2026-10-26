@@ -513,6 +513,71 @@ function isStandaloneMode() {
       || window.navigator.standalone === true;
 }
 
+function updateIosGuideContent() {
+  const isKakao = /KAKAOTALK/i.test(navigator.userAgent);
+  const isChrome = /CriOS/i.test(navigator.userAgent);
+  const titleEl = document.getElementById('ios-guide-title');
+  const subEl = document.getElementById('ios-guide-sub');
+  const bodyEl = document.getElementById('ios-guide-body');
+  if (!bodyEl) return;
+
+  if (isKakao) {
+    if (titleEl) titleEl.textContent = '카카오톡 브라우저 감지';
+    if (subEl) subEl.textContent = '카카오톡 내부에서는 홈 화면 추가가 차단되어 있습니다';
+    bodyEl.innerHTML = `
+      <div class="flex items-center gap-2.5 text-amber-300 font-bold mb-1">
+        <span>⚠️ 사파리(Safari) 또는 크롬으로 열기 필요</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">1</span>
+        <span>화면 우측 상단 또는 하단의 <strong>[더보기 ···]</strong>를 누릅니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">2</span>
+        <span>메뉴에서 <strong>[Safari로 열기]</strong> 또는 <strong>[기본 브라우저로 열기]</strong>를 선택합니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">3</span>
+        <span>열린 사파리/크롬에서 <strong>[공유 ⎋] ➜ [홈 화면에 추가]</strong>를 누르면 설치 완료!</span>
+      </div>
+    `;
+  } else if (isChrome) {
+    if (titleEl) titleEl.textContent = '아이폰 크롬(Chrome)에서 홈 화면 추가';
+    if (subEl) subEl.textContent = '크롬 브라우저에서 3초 만에 바탕화면 아이콘을 생성합니다';
+    bodyEl.innerHTML = `
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">1</span>
+        <span>주소창 우측 상단(또는 우측 하단 ···)의 <strong>[공유 버튼 ⎋]</strong>을 누릅니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">2</span>
+        <span>공유 메뉴 목록을 올려 <strong>[홈 화면에 추가 ⊞]</strong>를 누릅니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">3</span>
+        <span>우측 상단의 <strong>[추가]</strong>를 누르면 바탕화면에 설치 완료!</span>
+      </div>
+    `;
+  } else {
+    if (titleEl) titleEl.textContent = '아이폰 사파리(Safari)에서 홈 화면 추가';
+    if (subEl) subEl.textContent = '사파리에서 홈 화면에 추가하면 전체화면 앱으로 열립니다';
+    bodyEl.innerHTML = `
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">1</span>
+        <span>화면 하단 중앙의 <strong>[공유 버튼 ⎋]</strong>을 누릅니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">2</span>
+        <span>메뉴를 올려 <strong>[홈 화면에 추가 ⊞]</strong>를 누릅니다.</span>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">3</span>
+        <span>우측 상단의 <strong>[추가]</strong>를 누르면 바탕화면에 설치 완료!</span>
+      </div>
+    `;
+  }
+}
+
 function initA2hsSystem() {
   if (isStandaloneMode()) {
     // 이미 앱 아이콘으로 구동 중인 경우 불필요한 배너 제거
@@ -535,7 +600,7 @@ function initA2hsSystem() {
     alert('돌보니 앱이 홈 화면에 성공적으로 설치되었습니다!');
   });
 
-  // 2. iOS Safari 감지
+  // 2. iOS 감지 (Safari, Chrome, KakaoTalk 모두 대응)
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (isIOS) {
     const dismissedTime = localStorage.getItem('dolboni_a2hs_ios_dismissed');
@@ -543,9 +608,10 @@ function initA2hsSystem() {
     // 24시간 동안 보지 않기 체크
     if (!dismissedTime || (now - parseInt(dismissedTime)) > 86400000) {
       setTimeout(() => {
+        updateIosGuideContent();
         const modal = document.getElementById('ios-install-modal');
         if (modal) modal.classList.remove('hidden');
-      }, 2000);
+      }, 1500);
     }
   }
 }
@@ -582,6 +648,7 @@ function dismissIosInstallModal24h() {
 function openA2hsGuide() {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (isIOS) {
+    updateIosGuideContent();
     const modal = document.getElementById('ios-install-modal');
     if (modal) modal.classList.remove('hidden');
   } else if (AppState.deferredPrompt) {
