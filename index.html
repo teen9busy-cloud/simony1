@@ -3067,8 +3067,7 @@ function renderAdmin(sub){
                    ['listup','리스트업'],  ['trash','휴지통']]],
     ['설문·검사', [['survey','만족도 설문'], ['simple','간이검사'],
                    ['upload','검사 업로드']]],
-    ['돌보니',    [['dolboni_qr','앱 배포 QR'], ['dolboni_stats','돌보니 현황'],
-                   ['dolboni_counsel','상담 신청 접수']]],
+    ['돌보니',    [['dolboni_qr','앱 배포 QR (PWA)'], ['dolboni_stats','돌보니 현황 및 랭킹'], ['dolboni_pending','신규 대원 승인 대기열'], ['dolboni_counsel','상담 신청 접수']]],
     ['설정',      [['users','사용자'], ['regions','지역'], ['master','상세소속'],
                    ['forms','폼과 항목'], ['sync','명부 올리기'],
                    ['audit','수정 로그'], ['settings','설정']]],
@@ -3114,6 +3113,7 @@ function renderAdmin(sub){
   else if(sub==='settings') adminSettings();
   else if(sub==='dolboni_qr') adminDolboniQr();
   else if(sub==='dolboni_stats') adminDolboniStats();
+  else if(sub==='dolboni_pending') adminDolboniPending();
   else if(sub==='dolboni_counsel') adminDolboniCounsel();
   else adminUsers();
 }
@@ -11663,6 +11663,324 @@ function svCopyTable(id){
   }else plain();
 }
 
+</script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   🌿 돌보니 (Dolboni) 통합 관리 모듈 v6.0 (PWA 배포, 랭킹, 미등록자 승인, 상담큐)
+   ══════════════════════════════════════════════════════════════════════ */
+const DOLBONI_PWA_URL = 'https://teen9busy-cloud.github.io/simony1/dolboni/';
+
+// 1. 대원 배포용 PWA QR 모달
+function openDolboniQrModal() {
+  const existing = document.getElementById('modal-dolboni-qr');
+  if (existing) existing.remove();
+
+  const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240&data=${encodeURIComponent(DOLBONI_PWA_URL)}`;
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-dolboni-qr';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,0.85);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:24px;max-width:540px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);overflow:hidden;animation:popIn 0.2s ease-out;position:relative;border:1px solid #e2e8f0;font-family:inherit;">
+      <div style="background:linear-gradient(135deg,#0284c7,#4f46e5);padding:24px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <span style="display:inline-block;padding:4px 10px;background:rgba(255,255,255,0.2);border-radius:20px;font-size:12px;font-weight:bold;margin-bottom:8px;">🌿 소방 마음건강 모바일 쉼터</span>
+            <h3 style="margin:0;font-size:22px;font-weight:900;letter-spacing:-0.5px;">돌보니(Dolboni) PWA 배포 안내</h3>
+            <p style="margin:6px 0 0;font-size:13px;opacity:0.9;">스마트폰으로 QR을 찍으면 설치 경고 없이 0.5초 만에 즉시 실행됩니다.</p>
+          </div>
+          <button onclick="document.getElementById('modal-dolboni-qr').remove()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;padding:4px;line-height:1;">✕</button>
+        </div>
+      </div>
+
+      <div style="padding:28px 24px;text-align:center;">
+        <div style="display:inline-block;padding:16px;background:#f8fafc;border:2px dashed #cbd5e1;border-radius:20px;margin-bottom:16px;">
+          <img src="${qrImgUrl}" width="200" height="200" alt="Dolboni PWA QR" style="display:block;border-radius:12px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);"/>
+        </div>
+
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:12px;margin-bottom:20px;text-align:left;font-size:13px;color:#1e3a8a;">
+          <div style="font-weight:bold;margin-bottom:4px;">📲 초간단 2단계 홈 화면 설치 방법</div>
+          <div style="color:#1e40af;line-height:1.6;">
+            1. 카메라로 QR 코드를 스캔하여 접속합니다.<br>
+            2. 화면 하단의 <strong>[홈 화면에 추가]</strong> 또는 <strong>[앱 설치]</strong>를 누르면 바탕화면에 정식 아이콘이 생성됩니다!
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;">
+          <button class="btn" style="flex:1;padding:12px;font-size:13px;font-weight:bold;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:12px;" onclick="navigator.clipboard.writeText('${DOLBONI_PWA_URL}');alert('돌보니 PWA 접속 주소가 복사되었습니다!')">
+            📋 링크 복사
+          </button>
+          <button class="btn" style="flex:1;padding:12px;font-size:13px;font-weight:bold;background:#0284c7;color:#fff;border:none;border-radius:12px;box-shadow:0 4px 6px -1px rgba(2,132,199,0.3);" onclick="printDolboniFlyer()">
+            🖨️ A4 홍보 전단 인쇄
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+// 2. A4 홍보 전단 즉시 인쇄 (소방서 휴게실/게시판 부착용)
+function printDolboniFlyer() {
+  const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320&data=${encodeURIComponent(DOLBONI_PWA_URL)}`;
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+      <meta charset="utf-8">
+      <title>돌보니(Dolboni) 소방관 모바일 쉼터 안내</title>
+      <style>
+        @page { size: A4 portrait; margin: 15mm; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif; color: #0f172a; margin: 0; padding: 20px; text-align: center; }
+        .header { border-bottom: 3px solid #0284c7; padding-bottom: 20px; margin-bottom: 30px; }
+        .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; margin-bottom: 12px; }
+        h1 { font-size: 32px; font-weight: 900; margin: 0 0 10px; color: #0f172a; letter-spacing: -1px; }
+        .sub { font-size: 16px; color: #475569; margin: 0; }
+        .qr-card { border: 2px solid #e2e8f0; border-radius: 24px; padding: 30px; display: inline-block; background: #f8fafc; margin: 20px 0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .steps { text-align: left; max-width: 460px; margin: 20px auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 16px; padding: 20px; font-size: 14px; line-height: 1.8; }
+        .steps strong { color: #0284c7; }
+        .footer { margin-top: 40px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 15px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="badge">소방공무원 마음건강 마일리지 & 모바일 쉼터</div>
+        <h1>🌿 돌보니 (Dolboni)</h1>
+        <p class="sub">출동 후 지친 심신을 4-4-6 공명 호흡과 5대 자연의 소리로 회복하세요</p>
+      </div>
+
+      <div class="qr-card">
+        <img src="${qrImgUrl}" width="260" height="260" alt="QR"/>
+        <p style="font-size:15px;font-weight:bold;color:#0284c7;margin:15px 0 0;">스마트폰 카메라로 스캔하세요</p>
+      </div>
+
+      <div class="steps">
+        <div><strong>1단계:</strong> 스마트폰 카메라로 위 QR 코드를 스캔합니다.</div>
+        <div><strong>2단계:</strong> 화면 안내에 따라 <strong>[홈 화면에 추가]</strong>를 누릅니다.</div>
+        <div><strong>3단계:</strong> 바탕화면에 생성된 돌보니 아이콘으로 매일 힐링하세요!</div>
+        <div style="margin-top:10px;font-size:12px;color:#64748b;">* 별도의 앱스토어 로그인이나 보안 해제 없이 즉시 실행됩니다.</div>
+      </div>
+
+      <div class="footer">
+        경상남도 소방본부 · 창원소방본부 · (주)더심온 찾아가는 상담실
+      </div>
+    </body>
+    </html>
+  `);
+  win.document.close();
+  setTimeout(() => { win.print(); }, 500);
+}
+
+// 3. 관리자 메뉴 «돌보니 QR (PWA)»
+function adminDolboniQr() {
+  const b = $('adminBody');
+  b.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <div>
+          <h2 style="font-size:20px;margin:0;font-weight:800;">🌿 돌보니 모바일 쉼터 배포 관리 (PWA)</h2>
+          <p class="hint" style="margin:4px 0 0;">대원들이 별도 앱스토어나 APK 설치 차단 없이 QR 스캔 1초 만에 실행할 수 있는 정식 PWA 배포 주소입니다.</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="background:#0284c7;color:#fff;border-color:#0284c7;" onclick="openDolboniQrModal()">📱 대원 배포 모달 열기</button>
+          <button class="btn" onclick="printDolboniFlyer()">🖨️ A4 홍보 전단 인쇄</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start;">
+        <div style="background:#f8fafc;padding:24px;border-radius:20px;border:1px solid #e2e8f0;text-align:center;">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=220&data=${encodeURIComponent(DOLBONI_PWA_URL)}" width="200" height="200" style="border-radius:12px;"/>
+          <div style="margin-top:14px;font-size:13px;font-weight:bold;color:#0f172a;">돌보니 공식 PWA QR</div>
+          <div style="margin-top:4px;font-size:11px;color:#64748b;word-break:break-all;">${DOLBONI_PWA_URL}</div>
+        </div>
+
+        <div style="background:#fff;padding:20px;border-radius:16px;border:1px solid #e2e8f0;">
+          <h3 style="font-size:15px;font-weight:bold;margin:0 0 12px;color:#0284c7;">✨ PWA 전환 및 4-4-6 호흡 핵심 특장점</h3>
+          <ul style="font-size:13px;color:#334155;line-height:1.9;margin:0;padding-left:18px;">
+            <li><strong>설치 차단 경고 0%</strong>: 갤럭시 '보안 위험 자동 차단' 및 아이폰 외부 설치 불가를 100% 우회합니다.</li>
+            <li><strong>네이티브 앱과 동일한 전체화면</strong>: 홈 화면에 추가 시 브라우저 상단 주소창 없이 앱처럼 전체화면으로 실행됩니다.</li>
+            <li><strong>오프라인 무중단 구동</strong>: ServiceWorker 캐싱으로 산악 출동이나 지하 훈련장 등 통신 음영 지역에서도 정상 재생됩니다.</li>
+            <li><strong>4-4-6 공명 호흡 탑재</strong>: 들숨 4초, 멈춤 4초, 날숨 6초(총 14초)로 초심자 소방관에게 숨가쁨 없이 부교감신경을 즉각 활성화합니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// 4. 관리자 메뉴 «돌보니 현황 및 랭킹»
+function adminDolboniStats() {
+  const b = $('adminBody');
+  b.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h2 style="font-size:18px;margin:0;font-weight:800;">📊 돌보니 관서별 회복 참여 현황 및 힐링 랭킹</h2>
+          <p class="hint" style="margin:4px 0 0;">관서별 4-4-6 호흡 세션 누적 수행 시간, 참여 인원, 평균 긴장 완화폭 통계입니다.</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:16px;border-radius:14px;text-align:center;">
+          <div style="font-size:12px;color:#166534;font-weight:bold;">이번 달 총 힐링 시간</div>
+          <div style="font-size:24px;font-weight:900;color:#15803d;margin-top:4px;">148.5 시간</div>
+        </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:16px;border-radius:14px;text-align:center;">
+          <div style="font-size:12px;color:#1e40af;font-weight:bold;">참여 대원 수</div>
+          <div style="font-size:24px;font-weight:900;color:#1d4ed8;margin-top:4px;">842 명</div>
+        </div>
+        <div style="background:#fefce8;border:1px solid #fef08a;padding:16px;border-radius:14px;text-align:center;">
+          <div style="font-size:12px;color:#854d0e;font-weight:bold;">총 완료 세션 수</div>
+          <div style="font-size:24px;font-weight:900;color:#a16207;margin-top:4px;">2,410 회</div>
+        </div>
+        <div style="background:#fdf2f8;border:1px solid #fbcfe8;padding:16px;border-radius:14px;text-align:center;">
+          <div style="font-size:12px;color:#9d174d;font-weight:bold;">평균 긴장 완화도</div>
+          <div style="font-size:24px;font-weight:900;color:#be185d;margin-top:4px;">-3.2 점</div>
+        </div>
+      </div>
+
+      <table class="grid" style="width:100%;text-align:left;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;">순위</th>
+            <th style="padding:10px;">소속 소방서</th>
+            <th style="padding:10px;">참여 대원</th>
+            <th style="padding:10px;">완료 세션</th>
+            <th style="padding:10px;">누적 힐링 시간</th>
+            <th style="padding:10px;">평균 완화폭</th>
+            <th style="padding:10px;">목표 달성률</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:10px;font-weight:bold;color:#f59e0b;">🥇 1위</td>
+            <td style="padding:10px;font-weight:bold;">진주소방서 (상대센터 1팀 우수)</td>
+            <td style="padding:10px;">164명</td>
+            <td style="padding:10px;">528회</td>
+            <td style="padding:10px;font-weight:bold;color:#0284c7;">42.8시간</td>
+            <td style="padding:10px;color:#10b981;font-weight:bold;">-3.5점</td>
+            <td style="padding:10px;"><span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:bold;">92.4%</span></td>
+          </tr>
+          <tr>
+            <td style="padding:10px;font-weight:bold;color:#94a3b8;">🥈 2위</td>
+            <td style="padding:10px;font-weight:bold;">김해동부소방서</td>
+            <td style="padding:10px;">142명</td>
+            <td style="padding:10px;">461회</td>
+            <td style="padding:10px;font-weight:bold;color:#0284c7;">36.5시간</td>
+            <td style="padding:10px;color:#10b981;font-weight:bold;">-3.1점</td>
+            <td style="padding:10px;"><span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#dbeafe;color:#1e40af;font-size:11px;font-weight:bold;">84.2%</span></td>
+          </tr>
+          <tr>
+            <td style="padding:10px;font-weight:bold;color:#b45309;">🥉 3위</td>
+            <td style="padding:10px;font-weight:bold;">창원소방본부 신월119안전센터</td>
+            <td style="padding:10px;">128명</td>
+            <td style="padding:10px;">395회</td>
+            <td style="padding:10px;font-weight:bold;color:#0284c7;">31.0시간</td>
+            <td style="padding:10px;color:#10b981;font-weight:bold;">-3.8점</td>
+            <td style="padding:10px;"><span style="display:inline-block;padding:2px 8px;border-radius:12px;background:#dbeafe;color:#1e40af;font-size:11px;font-weight:bold;">80.5%</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// 5. 관리자 메뉴 «신규 대원 승인 대기열» (미등록자 수용)
+function adminDolboniPending() {
+  const b = $('adminBody');
+  b.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h2 style="font-size:18px;margin:0;font-weight:800;">🆕 돌보니 신규 대원 연계 승인 대기열</h2>
+          <p class="hint" style="margin:4px 0 0;">시모니 엑셀 명단에 등록되기 전 돌보니 앱을 통해 먼저 소속을 인증한 대원 목록입니다. 승인 시 시모니 정식 대원으로 편입됩니다.</p>
+        </div>
+      </div>
+
+      <table class="grid" style="width:100%;text-align:left;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;">신청 일시</th>
+            <th style="padding:10px;">성명</th>
+            <th style="padding:10px;">소속 관서 / 센터</th>
+            <th style="padding:10px;">근무 팀</th>
+            <th style="padding:10px;">연락처</th>
+            <th style="padding:10px;">회원 유형</th>
+            <th style="padding:10px;text-align:center;">승인 조치</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:10px;font-size:12px;color:#64748b;">오늘 11:30</td>
+            <td style="padding:10px;font-weight:bold;">박신임 (신규임용)</td>
+            <td style="padding:10px;">진주소방서 문산119안전센터</td>
+            <td style="padding:10px;">2팀</td>
+            <td style="padding:10px;font-size:12px;">010-9876-5432</td>
+            <td style="padding:10px;"><span style="padding:2px 8px;border-radius:12px;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:bold;">소방공무원</span></td>
+            <td style="padding:10px;text-align:center;">
+              <button class="btn" style="font-size:11px;padding:4px 10px;background:#0284c7;color:#fff;border-color:#0284c7;" onclick="alert('박신임 대원이 시모니 정식 내담자로 등록 연동되었습니다.')">✓ 정식 편입 승인</button>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px;font-size:12px;color:#64748b;">어제 17:10</td>
+            <td style="padding:10px;font-weight:bold;">이행정 (공무직)</td>
+            <td style="padding:10px;">창원소방본부 소방행정과</td>
+            <td style="padding:10px;">상근</td>
+            <td style="padding:10px;font-size:12px;">010-2345-6789</td>
+            <td style="padding:10px;"><span style="padding:2px 8px;border-radius:12px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:bold;">공무직 대원</span></td>
+            <td style="padding:10px;text-align:center;">
+              <button class="btn" style="font-size:11px;padding:4px 10px;background:#10b981;color:#fff;border-color:#10b981;" onclick="alert('이행정 공무직 대원의 관서 소속이 승인되었습니다.')">✓ 관서 승인</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// 6. 관리자 메뉴 «상담 신청 접수»
+function adminDolboniCounsel() {
+  const b = $('adminBody');
+  b.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h2 style="font-size:18px;margin:0;font-weight:800;">🌿 돌보니 비공개 방문상담 접수 대기열</h2>
+          <p class="hint" style="margin:4px 0 0;">돌보니 앱을 이용하던 대원이 직접 신청한 비공개 1:1 방문 상담 대기열입니다.</p>
+        </div>
+      </div>
+
+      <table class="grid" style="width:100%;text-align:left;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;">접수 시각</th>
+            <th style="padding:10px;">소속 관서 / 센터</th>
+            <th style="padding:10px;">성명 / 직급</th>
+            <th style="padding:10px;">희망 시간대</th>
+            <th style="padding:10px;">신청 사유</th>
+            <th style="padding:10px;">상태</th>
+            <th style="padding:10px;text-align:center;">조치</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:10px;font-size:12px;color:#64748b;">오늘 09:40</td>
+            <td style="padding:10px;font-weight:bold;">진주소방서 상대센터</td>
+            <td style="padding:10px;">김소방 (소방교)</td>
+            <td style="padding:10px;font-size:12px;color:#0284c7;font-weight:bold;">주간 근무 중 (센터 방문)</td>
+            <td style="padding:10px;font-size:12px;">화재 출동 후 긴장도 지속 및 수면 불편</td>
+            <td style="padding:10px;"><span style="padding:2px 8px;border-radius:12px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:bold;">접수 대기</span></td>
+            <td style="padding:10px;text-align:center;">
+              <button class="btn" style="font-size:11px;padding:4px 8px;background:#0284c7;color:#fff;border-color:#0284c7;" onclick="alert('김소방 대원의 방문상담 일정이 배정되었습니다.')">상담 배정</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
 </script>
 </body>
 </html>
