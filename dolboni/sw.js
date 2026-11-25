@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dolboni-v9.4-emdr-smart-orientation-bgm-clean';
+const CACHE_NAME = 'dolboni-v9.5-background-audio-stop-wakelock';
 const PRECACHE_URLS = [
   './',
   './index.html',
